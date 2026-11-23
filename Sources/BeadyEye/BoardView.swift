@@ -90,6 +90,7 @@ private struct BoardCard: View {
             }
             HStack {
                 DueBadge(issue: issue)
+                DeferBadge(issue: issue)
                 Spacer()
                 AssigneeLabel(issue: issue)
             }

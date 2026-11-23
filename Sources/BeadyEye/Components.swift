@@ -71,6 +71,17 @@ struct DueBadge: View {
     }
 }
 
+/// "Back Dec 3" on an issue that is deferred until a date.
+struct DeferBadge: View {
+    let issue: Issue
+    var body: some View {
+        if issue.status == "deferred", let d = issue.deferDate {
+            Label("Back \(d.formatted(.dateTime.month(.abbreviated).day()))", systemImage: "clock")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+    }
+}
+
 struct EpicProgress: View {
     let done: Int
     let total: Int

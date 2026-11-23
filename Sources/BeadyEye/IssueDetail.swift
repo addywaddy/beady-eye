@@ -146,6 +146,7 @@ struct IssueDetail: View {
                 }
                 propertyRow("Assignee") { assigneeControls }
                 propertyRow("Due") { dueControls }
+                if !issue.isClosed { propertyRow("Defer") { deferControls } }
                 if !issue.isEpic || issue.parent != nil {
                     propertyRow("Epic") { epicControl }
                 }
@@ -212,6 +213,49 @@ struct IssueDetail: View {
         } message: { Text("Enter the name exactly as it should be recorded in bd.") }
     }
 
+    @State private var pickDeferDate = false
+    @State private var deferPick = Calendar.current.date(byAdding: .day, value: 7, to: .now) ?? .now
+
+    private var deferControls: some View {
+        HStack(spacing: 8) {
+            if issue.status == "deferred" {
+                if let d = issue.deferDate {
+                    Label("Until \(d.formatted(.dateTime.month(.abbreviated).day().year()))", systemImage: "clock")
+                } else {
+                    Label("Until undeferred", systemImage: "snowflake").foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 4)
+                Button("Undefer") { store.undefer(issue.id) }.controlSize(.small)
+            } else {
+                Text("Not deferred").foregroundStyle(.secondary)
+                Menu("Defer…") {
+                    Button("Tomorrow") { store.defer_(issue.id, until: day(1)) }
+                    Button("Next week") { store.defer_(issue.id, until: day(7)) }
+                    Button("Next month") { store.defer_(issue.id, until: Calendar.current.date(byAdding: .month, value: 1, to: .now)) }
+                    Button("Choose a date…") { pickDeferDate = true }
+                    Divider()
+                    Button("Until I undefer it") { store.defer_(issue.id, until: nil) }
+                }
+                .menuStyle(.borderlessButton).fixedSize()
+                .popover(isPresented: $pickDeferDate) {
+                    VStack(spacing: 10) {
+                        DatePicker("Defer until", selection: $deferPick, in: Date.now..., displayedComponents: .date)
+                            .datePickerStyle(.graphical).labelsHidden()
+                        HStack {
+                            Button("Cancel") { pickDeferDate = false }
+                            Spacer()
+                            Button("Defer") { store.defer_(issue.id, until: deferPick); pickDeferDate = false }
+                                .keyboardShortcut(.defaultAction)
+                        }
+                    }
+                    .padding(14).frame(width: 260)
+                }
+            }
+        }
+    }
+
+    private func day(_ n: Int) -> Date? { Calendar.current.date(byAdding: .day, value: n, to: .now) }
+
     private var dueControls: some View {
         HStack(spacing: 8) {
             if let due = issue.dueDate {
@@ -227,10 +271,6 @@ struct IssueDetail: View {
                 Text("No due date").foregroundStyle(.secondary)
                 Button("Set…") { store.setDue(issue.id, Calendar.current.date(byAdding: .day, value: 1, to: .now)) }
                     .controlSize(.small)
-            }
-            if let d = issue.deferDate, issue.status == "deferred" {
-                Label("Deferred until \(d.formatted(.dateTime.month(.abbreviated).day()))", systemImage: "clock")
-                    .font(.caption).foregroundStyle(.secondary)
             }
         }
     }
@@ -324,6 +364,7 @@ struct IssueDetail: View {
                                     Spacer(minLength: 6)
                                     AssigneeLabel(issue: k)
                                     DueBadge(issue: k)
+                                    DeferBadge(issue: k)
                                     PriorityBadge(priority: k.priority)
                                 }
                                 .padding(.horizontal, 10).padding(.vertical, 7).contentShape(Rectangle())

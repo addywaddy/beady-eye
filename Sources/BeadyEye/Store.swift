@@ -483,6 +483,16 @@ final class Store {
         let v = date.map { Self.dayFormatter.string(from: $0) } ?? ""
         perform { try await $0.update(id, ["--due", v]) }
     }
+    /// Defers an issue, optionally until a day (bd then wakes it on its own). Moves the card at once.
+    func defer_(_ id: String, until date: Date?) {
+        applyLocally(id) { $0.status = "deferred" }
+        let v = date.map { Self.dayFormatter.string(from: $0) }
+        perform { try await $0.deferIssue(id, until: v) }
+    }
+    func undefer(_ id: String) {
+        applyLocally(id) { $0.status = "open" }
+        perform { try await $0.undefer(id) }
+    }
     func setParent(_ id: String, _ parent: String?) { perform { try await $0.update(id, ["--parent", parent ?? ""]) } }
     func close(_ id: String, reason: String?) { perform { try await $0.close(id, reason: reason) } }
     func reopen(_ id: String) { perform { try await $0.reopen(id) } }

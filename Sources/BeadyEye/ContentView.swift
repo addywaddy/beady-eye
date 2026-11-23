@@ -288,6 +288,7 @@ struct IssueRow: View {
                     if store.isBlocked(issue) { Image(systemName: "lock.fill").font(.caption).foregroundStyle(.red).help("Blocked by an unfinished dependency") }
                     AssigneeLabel(issue: issue)
                     DueBadge(issue: issue)
+                    DeferBadge(issue: issue)
                 }
                 if issue.isEpic { let p = store.progress(of: issue.id); EpicProgress(done: p.done, total: p.total) }
             }

@@ -242,6 +242,15 @@ actor BdClient {
     }
     func forget(_ key: String) async throws { try await run(["forget", key, "--json"]) }
 
+    /// `bd defer`: set the issue aside. With a date it's a snooze that bd wakes automatically once the date passes;
+    /// without one it stays deferred until `bd undefer`.
+    func deferIssue(_ id: String, until: String?) async throws {
+        var args = ["defer", id]
+        if let until { args += ["--until", until] }
+        try await run(args + ["--json"])
+    }
+    func undefer(_ id: String) async throws { try await run(["undefer", id, "--json"]) }
+
     /// Permanent. Without --force bd only previews, so the app confirms first and then forces.
     func delete(_ id: String) async throws { try await run(["delete", id, "--force", "--json"]) }
 
