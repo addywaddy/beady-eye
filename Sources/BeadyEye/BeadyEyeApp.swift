@@ -3,17 +3,16 @@ import SwiftUI
 @main
 struct BeadyEyeApp: App {
     @State private var store = Store()
-    @State private var showNew = false
 
     var body: some Scene {
         WindowGroup {
-            ContentView(showNew: $showNew)
+            ContentView()
                 .environment(store)
                 .frame(minWidth: 900, minHeight: 520)
         }
         .commands {
             CommandGroup(replacing: .newItem) {
-                Button("New Issue…") { showNew = true }
+                Button("New Issue…") { store.presentNewIssue() }
                     .keyboardShortcut("n")
                     .disabled(store.workspace == nil)
                 Button("Add Connection…") { store.addConnectionWithPanel() }

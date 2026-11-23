@@ -46,3 +46,89 @@ struct StatusIcon: View {
             .foregroundStyle(status == "closed" ? .green : status == "in_progress" ? .blue : status == "blocked" ? .red : .secondary)
     }
 }
+
+struct DueBadge: View {
+    let issue: Issue
+    var body: some View {
+        if let d = issue.dueDate {
+            let cal = Calendar.current
+            let day = d.formatted(.dateTime.month(.abbreviated).day())
+            let text = issue.isOverdue ? "Overdue · \(day)" : cal.isDateInToday(d) ? "Due today" : cal.isDateInTomorrow(d) ? "Due tomorrow" : "Due \(day)"
+            let color: Color = issue.isOverdue ? .red : issue.isDueSoon ? .orange : .secondary
+            Label(text, systemImage: "calendar")
+                .font(.caption).foregroundStyle(color)
+                .opacity(issue.isClosed ? 0.5 : 1)
+        }
+    }
+}
+
+struct EpicProgress: View {
+    let done: Int
+    let total: Int
+    var body: some View {
+        if total > 0 {
+            HStack(spacing: 6) {
+                ProgressView(value: Double(done), total: Double(total)).progressViewStyle(.linear).frame(maxWidth: 90)
+                Text("\(done)/\(total)").font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+            }
+        }
+    }
+}
+
+/// The assignee, highlighted when it's you.
+struct AssigneeLabel: View {
+    @Environment(Store.self) private var store
+    let issue: Issue
+    var body: some View {
+        if let a = issue.assignee, !a.isEmpty {
+            let mine = store.isMine(issue)
+            Label(mine ? "\(a) (you)" : a, systemImage: mine ? "person.fill" : "person")
+                .font(.caption).foregroundStyle(mine ? AnyShapeStyle(.tint) : AnyShapeStyle(.secondary))
+        }
+    }
+}
+
+/// Right-click actions shared by list rows and board cards.
+struct AssigneeActions: View {
+    @Environment(Store.self) private var store
+    let issue: Issue
+    var body: some View {
+        let unassigned = (issue.assignee ?? "").isEmpty
+        if !issue.isClosed {
+            if unassigned { Button("Claim", systemImage: "hand.raised") { store.claim(issue.id) } }
+            if let me = store.me, issue.assignee != me {
+                Button("Assign to Me", systemImage: "person.crop.circle") { store.setAssignee(issue.id, me) }
+            }
+            if !unassigned { Button("Unassign", systemImage: "person.slash") { store.setAssignee(issue.id, "") } }
+        }
+    }
+}
+
+/// Left-to-right layout that wraps onto new lines, for label chips.
+struct FlowLayout: Layout {
+    var spacing: CGFloat = 6
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let width = proposal.width ?? .infinity
+        var x: CGFloat = 0, y: CGFloat = 0, rowHeight: CGFloat = 0, maxX: CGFloat = 0
+        for s in subviews {
+            let size = s.sizeThatFits(.unspecified)
+            if x + size.width > width, x > 0 { x = 0; y += rowHeight + spacing; rowHeight = 0 }
+            x += size.width + spacing
+            rowHeight = max(rowHeight, size.height)
+            maxX = max(maxX, x - spacing)
+        }
+        return CGSize(width: maxX, height: y + rowHeight)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        var x = bounds.minX, y = bounds.minY, rowHeight: CGFloat = 0
+        for s in subviews {
+            let size = s.sizeThatFits(.unspecified)
+            if x + size.width > bounds.maxX, x > bounds.minX { x = bounds.minX; y += rowHeight + spacing; rowHeight = 0 }
+            s.place(at: CGPoint(x: x, y: y), proposal: .unspecified)
+            x += size.width + spacing
+            rowHeight = max(rowHeight, size.height)
+        }
+    }
+}

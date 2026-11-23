@@ -2,7 +2,6 @@ import SwiftUI
 
 struct ContentView: View {
     @Environment(Store.self) private var store
-    @Binding var showNew: Bool
 
     var body: some View {
         @Bindable var store = store
@@ -23,14 +22,18 @@ struct ContentView: View {
                         NavigationSplitView {
                             Sidebar().navigationSplitViewColumnWidth(min: 160, ideal: 180, max: 240)
                         } detail: {
-                            Group {
-                                if store.viewMode == .board { BoardView() } else { GraphView() }
-                            }
-                            .inspector(isPresented: Binding(
-                                get: { store.selection != nil },
-                                set: { if !$0 { store.selection = nil } })
-                            ) {
-                                detailPane.inspectorColumnWidth(min: 320, ideal: 400, max: 560)
+                            // A plain resizable side panel, the same kind of container the list view's detail
+                            // column is, rather than SwiftUI's .inspector.
+                            HSplitView {
+                                Group {
+                                    if store.viewMode == .board { BoardView() } else { GraphView() }
+                                }
+                                .frame(minWidth: 360, maxWidth: .infinity, maxHeight: .infinity)
+                                if store.selection != nil {
+                                    detailPane
+                                        .frame(minWidth: 320, idealWidth: 400, maxWidth: 560, maxHeight: .infinity)
+                                        .background(.background)
+                                }
                             }
                         }
                     }
@@ -44,12 +47,12 @@ struct ContentView: View {
                         }
                         .pickerStyle(.segmented)
                     }
-                    ToolbarItem { Button { showNew = true } label: { Label("New Issue", systemImage: "plus") } }
+                    ToolbarItem { Button { store.presentNewIssue() } label: { Label("New Issue", systemImage: "plus") } }
                     ToolbarItem { Button { Task { await store.refresh() } } label: { Label("Refresh", systemImage: "arrow.clockwise") } }
                 }
             }
         }
-        .sheet(isPresented: $showNew) { NewIssueSheet() }
+        .sheet(isPresented: $store.showNewIssue) { NewIssueSheet() }
         .alert("bd error", isPresented: Binding(get: { store.error != nil }, set: { if !$0 { store.error = nil } })) {
             Button("OK") { store.error = nil }
         } message: { Text(store.error ?? "") }
@@ -112,13 +115,46 @@ struct Sidebar: View {
     @Environment(Store.self) private var store
     var body: some View {
         @Bindable var store = store
-        List(selection: $store.filter) {
+        List(selection: $store.sidebar) {
             Section("Issues") {
                 ForEach(Filter.allCases) { f in
                     Label(f.label, systemImage: f.symbol)
                         .badge(store.count(f))
-                        .tag(f)
+                        .tag(SidebarItem.filter(f))
                 }
+            }
+            if !store.epics.isEmpty {
+                Section("Epics") {
+                    ForEach(store.epics) { e in
+                        let p = store.progress(of: e.id)
+                        Label(e.title, systemImage: "square.stack.3d.up").lineLimit(1)
+                            .badge(p.total == 0 ? nil : Text("\(p.done)/\(p.total)"))
+                            .tag(SidebarItem.epic(e.id))
+                    }
+                }
+            }
+            Section("Assignees") {
+                if let me = store.me {
+                    Label {
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text("Me (\(me))").lineLimit(1)
+                            if let email = store.meEmail {
+                                Text(email).font(.caption2).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                            }
+                        }
+                    } icon: { Image(systemName: "person.crop.circle.fill") }
+                    .badge(store.issues(for: .mine).count)
+                    .tag(SidebarItem.mine)
+                    .help(store.meEmail.map { "\(me) <\($0)>" } ?? me)
+                }
+                ForEach(store.otherAssignees, id: \.self) { a in
+                    Label(a, systemImage: "person").lineLimit(1)
+                        .badge(store.issues(for: .assignee(a)).count)
+                        .tag(SidebarItem.assignee(a))
+                }
+                Label("Unassigned", systemImage: "person.slash")
+                    .badge(store.issues(for: .unassigned).count)
+                    .tag(SidebarItem.unassigned)
             }
         }
         .listStyle(.sidebar)
@@ -186,6 +222,7 @@ struct IssueList: View {
 }
 
 struct IssueRow: View {
+    @Environment(Store.self) private var store
     let issue: Issue
     let ready: Bool
     var body: some View {
@@ -197,12 +234,15 @@ struct IssueRow: View {
                     Text(issue.id).font(.caption.monospaced()).foregroundStyle(.tertiary)
                     TypeBadge(type: issue.issueType)
                     if ready { Image(systemName: "bolt.fill").font(.caption).foregroundStyle(.green) }
-                    if let a = issue.assignee, !a.isEmpty { Text(a).font(.caption).foregroundStyle(.secondary) }
+                    AssigneeLabel(issue: issue)
+                    DueBadge(issue: issue)
                 }
+                if issue.isEpic { let p = store.progress(of: issue.id); EpicProgress(done: p.done, total: p.total) }
             }
             Spacer(minLength: 0)
             PriorityBadge(priority: issue.priority)
         }
         .padding(.vertical, 2)
+        .contextMenu { AssigneeActions(issue: issue) }
     }
 }

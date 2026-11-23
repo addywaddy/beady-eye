@@ -76,11 +76,16 @@ private struct BoardCard: View {
                 if ready { Image(systemName: "bolt.fill").foregroundStyle(.green).help("Ready to work on") }
                 if waiting { Image(systemName: "lock.fill").foregroundStyle(.orange).help("Waiting on a dependency") }
             }
-            HStack {
-                Text(issue.id).font(.caption.monospaced()).foregroundStyle(.tertiary)
-                Spacer()
-                if let a = issue.assignee, !a.isEmpty { Text(a).font(.caption).foregroundStyle(.secondary) }
+            if issue.isEpic { let p = store.progress(of: issue.id); EpicProgress(done: p.done, total: p.total) }
+            if let pid = issue.parent, let parent = store.issue(pid), store.sidebar != .epic(pid) {
+                Label(parent.title, systemImage: "square.stack.3d.up").font(.caption).lineLimit(1).foregroundStyle(.secondary)
             }
+            HStack {
+                DueBadge(issue: issue)
+                Spacer()
+                AssigneeLabel(issue: issue)
+            }
+            Text(issue.id).font(.caption.monospaced()).foregroundStyle(.tertiary)
         }
         .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -89,5 +94,6 @@ private struct BoardCard: View {
         .contentShape(RoundedRectangle(cornerRadius: 8))
         .onTapGesture { store.selection = issue.id }
         .draggable(issue.id)
+        .contextMenu { AssigneeActions(issue: issue) }
     }
 }

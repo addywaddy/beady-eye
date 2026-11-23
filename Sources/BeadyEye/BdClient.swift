@@ -3,6 +3,23 @@ import Foundation
 /// Written by two reader threads, read only after both finish (DispatchGroup orders it).
 private final class OutputBuffer: @unchecked Sendable { var out = Data(); var err = Data() }
 
+/// Appends one line per bd call (writes only, not the 4-second polling) to ~/Library/Logs/BeadyEye/bd.log,
+/// so "I clicked and nothing happened" can be answered from facts.
+enum CallLog {
+    static let url: URL = {
+        let dir = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Logs/BeadyEye")
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir.appendingPathComponent("bd.log")
+    }()
+    static func write(_ line: String) {
+        let stamp = ISO8601DateFormatter().string(from: .now)
+        guard let data = "\(stamp) \(line)\n".data(using: .utf8) else { return }
+        if let h = try? FileHandle(forWritingTo: url) { h.seekToEndOfFile(); h.write(data); try? h.close() }
+        else { try? data.write(to: url) }
+    }
+    static let readOnly: Set<String> = ["list", "ready", "show"]
+}
+
 struct BdError: LocalizedError {
     let message: String
     var errorDescription: String? { message }
@@ -64,6 +81,11 @@ actor BdClient {
             DispatchQueue.global().async { buf.err = err.fileHandleForReading.readDataToEndOfFile(); group.leave() }
             p.terminationHandler = { proc in
                 group.notify(queue: .global()) {
+                    if !CallLog.readOnly.contains(args.first ?? "") {
+                        let tail = String(decoding: buf.err.isEmpty ? buf.out : buf.err, as: UTF8.self)
+                            .split(separator: "\n").filter { !$0.hasPrefix("Warning:") }.prefix(2).joined(separator: " / ")
+                        CallLog.write("bd \(args.joined(separator: " ")) -> exit \(proc.terminationStatus) \(tail)")
+                    }
                     if proc.terminationStatus == 0 {
                         cont.resume(returning: buf.out)
                     } else {
@@ -110,12 +132,42 @@ actor BdClient {
         return issue
     }
 
+    /// Who `bd` thinks you are: the name by its documented order ($BEADS_ACTOR, git user.name, $USER) and
+    /// the email it records as an issue's `owner` (git user.email). Resolved in a login shell inside the
+    /// project so it matches what the terminal does.
+    func currentIdentity() async -> (name: String, email: String?) {
+        let dir = workspace
+        let fallback = NSUserName()
+        return await withCheckedContinuation { cont in
+            DispatchQueue.global().async {
+                let p = Process()
+                p.executableURL = URL(fileURLWithPath: "/bin/zsh")
+                p.arguments = ["-lc", #"printf '%s\n%s' "${BEADS_ACTOR:-$(git config user.name 2>/dev/null)}" "$(git config user.email 2>/dev/null)""#]
+                p.currentDirectoryURL = dir
+                let pipe = Pipe()
+                p.standardOutput = pipe
+                p.standardError = FileHandle.nullDevice
+                guard (try? p.run()) != nil else { return cont.resume(returning: (fallback, nil)) }
+                let data = pipe.fileHandleForReading.readDataToEndOfFile()
+                p.waitUntilExit()
+                let lines = String(decoding: data, as: UTF8.self).components(separatedBy: "\n")
+                let name = (lines.first ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                let email = (lines.count > 1 ? lines[1] : "").trimmingCharacters(in: .whitespacesAndNewlines)
+                cont.resume(returning: (name.isEmpty ? fallback : name, email.isEmpty ? nil : email))
+            }
+        }
+    }
+
     // MARK: Writes
 
-    func create(title: String, type: String, priority: Int, description: String) async throws -> String {
+    func create(title: String, type: String, priority: Int, description: String,
+                assignee: String = "", due: String? = nil, parent: String? = nil) async throws -> String {
         struct Created: Decodable { let id: String }
         var args = ["create", title, "-t", type, "-p", String(priority)]
         if !description.isEmpty { args += ["-d", description] }
+        if !assignee.isEmpty { args += ["-a", assignee] }
+        if let due { args += ["--due", due] }
+        if let parent, !parent.isEmpty { args += ["--parent", parent] }
         return try await decode(Created.self, args).id
     }
 

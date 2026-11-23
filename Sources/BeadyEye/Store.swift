@@ -2,15 +2,25 @@ import Foundation
 import Observation
 import AppKit
 
+/// What the sidebar is pointing at: a status-style filter, an assignee, or an epic's children.
+enum SidebarItem: Hashable {
+    case filter(Filter)
+    case assignee(String)
+    case mine
+    case unassigned
+    case epic(String)
+}
+
 enum Filter: String, CaseIterable, Identifiable {
-    case active, ready, inProgress, blocked, closed, all
+    case active, ready, inProgress, blocked, overdue, closed, all
     var id: String { rawValue }
     var label: String {
         switch self {
-        case .active: "Open"
+        case .active: "Active"
         case .ready: "Ready"
         case .inProgress: "In Progress"
         case .blocked: "Blocked"
+        case .overdue: "Overdue"
         case .closed: "Closed"
         case .all: "All"
         }
@@ -21,6 +31,7 @@ enum Filter: String, CaseIterable, Identifiable {
         case .ready: "bolt"
         case .inProgress: "circle.lefthalf.filled"
         case .blocked: "exclamationmark.circle"
+        case .overdue: "calendar.badge.exclamationmark"
         case .closed: "checkmark.circle"
         case .all: "list.bullet"
         }
@@ -61,7 +72,11 @@ final class Store {
     }
     var issues: [Issue] = []
     var readyIDs: Set<String> = []
-    var filter: Filter = .active
+    var sidebar: SidebarItem = .filter(.active)
+    var me: String?             // the name bd uses for "you"; claims are recorded under it
+    var meEmail: String?        // git user.email, which bd stores as an issue's `owner`
+    var showNewIssue = false
+    var newIssueParent: String?
     var viewMode: ViewMode = ViewMode(rawValue: UserDefaults.standard.string(forKey: "viewMode") ?? "") ?? .list {
         didSet { UserDefaults.standard.set(viewMode.rawValue, forKey: "viewMode") }
     }
@@ -135,8 +150,15 @@ final class Store {
     private func activeChanged() {
         poller?.cancel()
         issues = []; readyIDs = []; detail = nil; selection = nil; error = nil; refreshError = nil
+        sidebar = .filter(.active)
+        me = nil; meEmail = nil
         guard let ws = workspace else { client = nil; return }
-        client = BdClient(workspace: ws)
+        let c = BdClient(workspace: ws)
+        client = c
+        Task { [weak self] in
+            let who = await c.currentIdentity()
+            if let self, self.client === c { self.me = who.name; self.meEmail = who.email }
+        }
         poller = Task { [weak self] in
             while !Task.isCancelled {
                 await self?.refresh()
@@ -153,6 +175,7 @@ final class Store {
         case .ready: issues.filter { readyIDs.contains($0.id) }
         case .inProgress: issues.filter { $0.status == "in_progress" }
         case .blocked: issues.filter { $0.status == "blocked" || ($0.status == "open" && !readyIDs.contains($0.id)) }
+        case .overdue: issues.filter(\.isOverdue)
         case .closed: issues.filter(\.isClosed)
         case .all: issues
         }
@@ -165,10 +188,44 @@ final class Store {
 
     private func byPriority(_ a: Issue, _ b: Issue) -> Bool { (a.priority, a.createdAt ?? "") < (b.priority, b.createdAt ?? "") }
 
-    var visible: [Issue] { issues(for: filter).filter(matchesSearch).sorted(by: byPriority) }
+    func issues(for item: SidebarItem) -> [Issue] {
+        switch item {
+        case .filter(let f): issues(for: f)
+        case .assignee(let a): issues.filter { $0.assignee == a && !$0.isClosed }
+        case .mine: issues.filter { isMine($0) && !$0.isClosed }
+        case .unassigned: issues.filter { ($0.assignee ?? "").isEmpty && !$0.isClosed }
+        case .epic(let id): issues.filter { $0.parent == id }
+        }
+    }
 
-    /// Issues in one board column, honouring the search box.
-    func column(_ status: String) -> [Issue] { issues.filter { $0.status == status && matchesSearch($0) }.sorted(by: byPriority) }
+    var visible: [Issue] { issues(for: sidebar).filter(matchesSearch).sorted(by: byPriority) }
+
+    /// What the board and graph show: the sidebar selection applies to them too. "Active" is the
+    /// default, so on a board it means the whole board (closed work stays visible in its column).
+    var scoped: [Issue] {
+        if case .filter(.active) = sidebar { return issues }
+        return issues(for: sidebar)
+    }
+
+    /// Issues in one board column, honouring the sidebar scope and the search box.
+    func column(_ status: String) -> [Issue] { scoped.filter { $0.status == status && matchesSearch($0) }.sorted(by: byPriority) }
+
+    // MARK: Epics and people
+
+    var epics: [Issue] { issues.filter { $0.isEpic && !$0.isClosed }.sorted(by: byPriority) }
+    func children(of id: String) -> [Issue] { issues.filter { $0.parent == id }.sorted(by: byPriority) }
+    func progress(of id: String) -> (done: Int, total: Int) {
+        let kids = issues.filter { $0.parent == id }
+        return (kids.filter(\.isClosed).count, kids.count)
+    }
+    func issue(_ id: String) -> Issue? { issues.first { $0.id == id } }
+    var assignees: [String] { Set(issues.compactMap(\.assignee).filter { !$0.isEmpty }).sorted() }
+
+    func isMine(_ i: Issue) -> Bool { me != nil && i.assignee == me }
+    /// Everyone with an issue except you, who gets a pinned row of your own.
+    var otherAssignees: [String] { assignees.filter { $0 != me } }
+
+    func presentNewIssue(parent: String? = nil) { newIssueParent = parent; showNewIssue = true }
 
     func count(_ f: Filter) -> Int { issues(for: f).count }
 
@@ -210,13 +267,24 @@ final class Store {
         }
     }
 
-    func create(title: String, type: String, priority: Int, description: String) {
+    /// bd reads a bare date as local midnight, so send the local calendar day.
+    private static let dayFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.dateFormat = "yyyy-MM-dd"
+        return f
+    }()
+
+    func create(title: String, type: String, priority: Int, description: String,
+                assignee: String = "", due: Date? = nil, parent: String? = nil) {
         guard let client else { return }
+        let dueString = due.map { Self.dayFormatter.string(from: $0) }
         Task {
             do {
-                let id = try await client.create(title: title, type: type, priority: priority, description: description)
+                let id = try await client.create(title: title, type: type, priority: priority, description: description,
+                                                 assignee: assignee, due: dueString, parent: parent)
                 await refresh()
-                filter = .active
+                sidebar = .filter(.active)
                 selection = id
             } catch { self.error = error.localizedDescription }
         }
@@ -236,8 +304,41 @@ final class Store {
 
     func setStatus(_ id: String, _ s: String) { perform { try await $0.setStatus(id, s) } }
     func setPriority(_ id: String, _ p: Int) { perform { try await $0.update(id, ["-p", String(p)]) } }
-    func setTitle(_ id: String, _ t: String) { perform { try await $0.update(id, ["--title", t]) } }
-    func setDescription(_ id: String, _ d: String) { perform { try await $0.update(id, ["-d", d, "--allow-empty-description"]) } }
+    func setTitle(_ id: String, _ t: String) {
+        applyLocally(id) { $0.title = t }
+        perform { try await $0.update(id, ["--title", t]) }
+    }
+    func setDescription(_ id: String, _ d: String) {
+        applyLocally(id) { $0.description = d }
+        perform { try await $0.update(id, ["-d", d, "--allow-empty-description"]) }
+    }
+    /// Show a change immediately; the refresh that follows the bd call confirms or corrects it.
+    func applyLocally(_ id: String, _ change: (inout Issue) -> Void) {
+        if let i = issues.firstIndex(where: { $0.id == id }) { change(&issues[i]) }
+        if var d = detail, d.id == id { change(&d); detail = d }
+    }
+
+    /// For an open issue, `bd update --claim` assigns you and starts it atomically (and fails if someone
+    /// else holds it). bd refuses `--claim` on anything not open, so there we just assign you.
+    func claim(_ id: String) {
+        guard let issue = issue(id) else { return }
+        if issue.status == "open" || me == nil {
+            perform { try await $0.update(id, ["--claim"]) }
+        } else if let me {
+            setAssignee(id, me)
+        }
+    }
+
+    func setAssignee(_ id: String, _ name: String) {
+        let n = name.trimmingCharacters(in: .whitespaces)
+        applyLocally(id) { $0.assignee = n.isEmpty ? nil : n }
+        perform { try await $0.update(id, ["-a", n]) }
+    }
+    func setDue(_ id: String, _ date: Date?) {
+        let v = date.map { Self.dayFormatter.string(from: $0) } ?? ""
+        perform { try await $0.update(id, ["--due", v]) }
+    }
+    func setParent(_ id: String, _ parent: String?) { perform { try await $0.update(id, ["--parent", parent ?? ""]) } }
     func close(_ id: String, reason: String?) { perform { try await $0.close(id, reason: reason) } }
     func reopen(_ id: String) { perform { try await $0.reopen(id) } }
     func comment(_ id: String, _ text: String) { perform { try await $0.comment(id, text: text) } }

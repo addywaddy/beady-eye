@@ -5,92 +5,295 @@ struct IssueDetail: View {
     let issue: Issue
     @State private var title = ""
     @State private var desc = ""
+    @State private var editingDesc = false
     @State private var newComment = ""
     @State private var newLabel = ""
+    @State private var askOtherName = false
+    @State private var otherName = ""
     @State private var closeReason = ""
     @State private var showClose = false
+    @FocusState private var titleFocused: Bool
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
+            VStack(alignment: .leading, spacing: 22) {
                 header
-                controls
-                section("Description") {
-                    TextEditor(text: $desc)
-                        .font(.body).frame(minHeight: 90)
-                        .scrollContentBackground(.hidden)
-                        .padding(6).background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 6))
-                        .onChange(of: desc) { _, _ in }
-                    HStack {
-                        Spacer()
-                        Button("Save Description") { store.setDescription(issue.id, desc) }
-                            .disabled(desc == (issue.description ?? ""))
-                    }
+                if issue.isClosed { closedNote }
+                properties
+                descriptionSection
+                if issue.isEpic { children }
+                // The parent is edited under Epic in the properties card; keep it out of the blocking lists.
+                relations("Depends on", issue.dependencies?.filter { $0.dependencyType != "parent-child" })
+                relations("Blocks", issue.dependents?.filter { $0.dependencyType != "parent-child" })
+                if let n = issue.notes, !n.isEmpty {
+                    section("Notes") { card { rich(n) } }
                 }
-                labels
-                relations("Depends on", issue.dependencies)
-                relations("Blocks", issue.dependents)
-                if let n = issue.notes, !n.isEmpty { section("Notes") { Text(n).textSelection(.enabled) } }
                 comments
             }
             .padding(20)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .onAppear { title = issue.title; desc = issue.description ?? "" }
+        // Follow changes made elsewhere (an agent, the CLI) unless you're mid-edit.
+        .onChange(of: issue.title) { _, new in if !titleFocused { title = new } }
+        .onChange(of: issue.description) { _, new in if !editingDesc { desc = new ?? "" } }
         .sheet(isPresented: $showClose) { closeSheet }
     }
 
-    // MARK: Pieces
+    // MARK: Header
 
     private var header: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 10) {
                 Text(issue.id).font(.callout.monospaced()).foregroundStyle(.secondary).textSelection(.enabled)
                 TypeBadge(type: issue.issueType)
-                if let c = issue.createdAt?.beadsDate { Text("Created \(c, format: .relative(presentation: .named))").font(.caption).foregroundStyle(.tertiary) }
+                if let c = issue.createdAt?.beadsDate {
+                    Text("Created \(c, format: .relative(presentation: .named))").font(.caption).foregroundStyle(.tertiary)
+                }
+                Spacer()
+                if issue.isClosed {
+                    Button("Reopen") { store.reopen(issue.id) }
+                } else {
+                    Button("Close…") { showClose = true }
+                }
             }
             TextField("Title", text: $title, axis: .vertical)
                 .textFieldStyle(.plain).font(.title.bold())
-                .onSubmit { if title != issue.title { store.setTitle(issue.id, title) } }
+                .focused($titleFocused)
+                .onSubmit(commitTitle)
+                .onChange(of: titleFocused) { _, focused in if !focused { commitTitle() } }
         }
     }
 
-    private var controls: some View {
-        HStack(spacing: 14) {
-            Picker("Status", selection: Binding(get: { issue.status }, set: { store.setStatus(issue.id, $0) })) {
-                ForEach(Status.allCases) { Text($0.label).tag($0.rawValue) }
-            }.fixedSize()
-            Picker("Priority", selection: Binding(get: { issue.priority }, set: { store.setPriority(issue.id, $0) })) {
-                ForEach(0...4, id: \.self) { Text("P\($0)").tag($0) }
-            }.fixedSize()
-            Spacer()
-            if issue.isClosed {
-                Button("Reopen") { store.reopen(issue.id) }
-            } else {
-                Button("Close…") { showClose = true }
-            }
-        }
+    private func commitTitle() {
+        let t = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        if t.isEmpty { title = issue.title } else if t != issue.title { store.setTitle(issue.id, t) }
     }
 
-    private var labels: some View {
-        section("Labels") {
-            HStack {
-                ForEach(issue.labels ?? [], id: \.self) { l in
-                    HStack(spacing: 3) {
-                        Text(l)
-                        Button { store.removeLabel(issue.id, l) } label: { Image(systemName: "xmark.circle.fill") }.buttonStyle(.plain)
-                    }
-                    .font(.caption).padding(.horizontal, 8).padding(.vertical, 3)
-                    .background(.tint.opacity(0.15), in: Capsule())
+    @ViewBuilder private var closedNote: some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+            VStack(alignment: .leading, spacing: 2) {
+                if let d = issue.closedAt?.beadsDate {
+                    Text("Closed \(d, format: .relative(presentation: .named))").font(.callout.weight(.medium))
+                } else {
+                    Text("Closed").font(.callout.weight(.medium))
                 }
-                TextField("Add label", text: $newLabel)
-                    .textFieldStyle(.roundedBorder).frame(width: 120)
-                    .onSubmit {
-                        let l = newLabel.trimmingCharacters(in: .whitespaces)
-                        guard !l.isEmpty else { return }
-                        store.addLabel(issue.id, l); newLabel = ""
-                    }
+                if let r = issue.closeReason, !r.isEmpty { Text(r).font(.callout).foregroundStyle(.secondary).textSelection(.enabled) }
             }
+            Spacer(minLength: 0)
+        }
+        .padding(12)
+        .background(.green.opacity(0.1), in: RoundedRectangle(cornerRadius: 10))
+    }
+
+    // MARK: Properties
+
+    private var properties: some View {
+        card {
+            Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 14, verticalSpacing: 12) {
+                propertyRow("Status") {
+                    Picker("Status", selection: Binding(get: { issue.status }, set: { store.setStatus(issue.id, $0) })) {
+                        ForEach(Status.allCases) { Label($0.label, systemImage: $0.symbol).tag($0.rawValue) }
+                    }.labelsHidden().fixedSize()
+                }
+                propertyRow("Priority") {
+                    Picker("Priority", selection: Binding(get: { issue.priority }, set: { store.setPriority(issue.id, $0) })) {
+                        ForEach(0...4, id: \.self) { Text("P\($0)").tag($0) }
+                    }.labelsHidden().fixedSize()
+                }
+                propertyRow("Assignee") { assigneeControls }
+                propertyRow("Due") { dueControls }
+                if !issue.isEpic || issue.parent != nil {
+                    propertyRow("Epic") { epicControl }
+                }
+                propertyRow("Labels") { labelControls }
+            }
+        }
+    }
+
+    private func propertyRow<C: View>(_ name: String, @ViewBuilder _ content: () -> C) -> some View {
+        GridRow {
+            Text(name).foregroundStyle(.secondary).frame(width: 64, alignment: .leading)
+            content().frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    /// The assignee is shown, not typed: it always reflects the issue, and changes only through the menu.
+    private var assigneeControls: some View {
+        let name = issue.assignee ?? ""
+        return HStack(spacing: 8) {
+            if name.isEmpty {
+                Text("Unassigned").foregroundStyle(.secondary)
+                if !issue.isClosed {
+                    Button { store.claim(issue.id) } label: { Label("Claim", systemImage: "hand.raised") }
+                        .controlSize(.small)
+                        .help("Assign to \(store.me ?? "you") and start work")
+                }
+            } else {
+                VStack(alignment: .leading, spacing: 1) {
+                    Label(store.isMine(issue) ? "\(name) (you)" : name, systemImage: store.isMine(issue) ? "person.fill" : "person")
+                        .foregroundStyle(store.isMine(issue) ? AnyShapeStyle(.tint) : AnyShapeStyle(.primary))
+                    if store.isMine(issue), let email = store.meEmail {
+                        Text(email).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+                            .padding(.leading, 22)
+                    }
+                }
+            }
+            Spacer(minLength: 4)
+            Menu {
+                if let me = store.me, name != me {
+                    Button("Me (\(me))") { store.setAssignee(issue.id, me) }
+                }
+                ForEach(store.otherAssignees.filter { $0 != name }, id: \.self) { a in
+                    Button(a) { store.setAssignee(issue.id, a) }
+                }
+                Divider()
+                Button("Someone else…") { otherName = ""; askOtherName = true }
+            } label: { Image(systemName: "person.crop.circle.badge.plus") }
+            .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize().help("Change assignee")
+            if !name.isEmpty {
+                Button { CallLog.write("UI: unassign tapped for \(issue.id)"); store.setAssignee(issue.id, "") } label: {
+                    Image(systemName: "xmark.circle.fill").imageScale(.large)
+                        .frame(width: 24, height: 24).contentShape(Rectangle())   // generous click target
+                }
+                .buttonStyle(.plain).foregroundStyle(.secondary).help("Unassign")
+            }
+        }
+        .alert("Assign to", isPresented: $askOtherName) {
+            TextField("Name", text: $otherName)
+            Button("Assign") {
+                let n = otherName.trimmingCharacters(in: .whitespaces)
+                if !n.isEmpty { store.setAssignee(issue.id, n) }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: { Text("Enter the name exactly as it should be recorded in bd.") }
+    }
+
+    private var dueControls: some View {
+        HStack(spacing: 8) {
+            if let due = issue.dueDate {
+                DatePicker("Due", selection: Binding(get: { due }, set: { store.setDue(issue.id, $0) }), displayedComponents: .date)
+                    .labelsHidden().datePickerStyle(.field).fixedSize()
+                if issue.isOverdue { Text("Overdue").font(.caption.bold()).foregroundStyle(.red) }
+                Spacer(minLength: 4)
+                Button { store.setDue(issue.id, nil) } label: {
+                    Image(systemName: "xmark.circle.fill").imageScale(.large).frame(width: 24, height: 24).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain).foregroundStyle(.secondary).help("Clear due date")
+            } else {
+                Text("No due date").foregroundStyle(.secondary)
+                Button("Set…") { store.setDue(issue.id, Calendar.current.date(byAdding: .day, value: 1, to: .now)) }
+                    .controlSize(.small)
+            }
+            if let d = issue.deferDate, issue.status == "deferred" {
+                Label("Deferred until \(d.formatted(.dateTime.month(.abbreviated).day()))", systemImage: "clock")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private var epicControl: some View {
+        Menu {
+            Button("None") { store.setParent(issue.id, nil) }
+            Divider()
+            ForEach(store.epics.filter { $0.id != issue.id }) { e in
+                Button(e.title) { store.setParent(issue.id, e.id) }
+            }
+        } label: {
+            Label(issue.parent.flatMap { store.issue($0)?.title } ?? issue.parent ?? "None", systemImage: "square.stack.3d.up")
+                .lineLimit(1)
+        }
+        .menuStyle(.borderlessButton).fixedSize()
+    }
+
+    private var labelControls: some View {
+        FlowLayout(spacing: 6) {
+            ForEach(issue.labels ?? [], id: \.self) { l in
+                HStack(spacing: 4) {
+                    Text(l)
+                    Button { store.removeLabel(issue.id, l) } label: { Image(systemName: "xmark") .font(.system(size: 8, weight: .bold)) }
+                        .buttonStyle(.plain)
+                }
+                .font(.caption).padding(.horizontal, 8).padding(.vertical, 3)
+                .background(.tint.opacity(0.15), in: Capsule())
+            }
+            TextField("Add label", text: $newLabel)
+                .textFieldStyle(.plain).font(.caption).frame(width: 80)
+                .padding(.horizontal, 8).padding(.vertical, 3)
+                .overlay(Capsule().strokeBorder(.separator))
+                .onSubmit {
+                    let l = newLabel.trimmingCharacters(in: .whitespaces)
+                    guard !l.isEmpty else { return }
+                    store.addLabel(issue.id, l); newLabel = ""
+                }
+        }
+    }
+
+    // MARK: Description
+
+    private var descriptionSection: some View {
+        section("Description", trailing: {
+            if !editingDesc {
+                Button { desc = issue.description ?? ""; editingDesc = true } label: {
+                    Label((issue.description ?? "").isEmpty ? "Add" : "Edit", systemImage: "pencil")
+                }
+                .buttonStyle(.borderless).controlSize(.small).help("Edit description")
+            }
+        }) {
+            if editingDesc {
+                VStack(alignment: .trailing, spacing: 8) {
+                    TextEditor(text: $desc)
+                        .font(.body).frame(minHeight: 120)
+                        .scrollContentBackground(.hidden)
+                        .padding(8).background(.background, in: RoundedRectangle(cornerRadius: 8))
+                        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(.tint))
+                    HStack {
+                        Button("Cancel") { desc = issue.description ?? ""; editingDesc = false }.help("Discard changes")
+                        Button("Save") { store.setDescription(issue.id, desc); editingDesc = false }
+                            .keyboardShortcut(.return, modifiers: .command)
+                            .buttonStyle(.borderedProminent).help("Save description (⌘↩)")
+                    }
+                }
+            } else if let d = issue.description, !d.isEmpty {
+                card { rich(d) }
+            } else {
+                Text("No description.").foregroundStyle(.tertiary)
+            }
+        }
+    }
+
+    // MARK: Relations
+
+    private var children: some View {
+        let kids = store.children(of: issue.id)
+        let p = store.progress(of: issue.id)
+        return section("Child issues", trailing: { EpicProgress(done: p.done, total: p.total) }) {
+            if kids.isEmpty {
+                Text("No child issues yet.").foregroundStyle(.tertiary)
+            } else {
+                card(padding: 4) {
+                    VStack(spacing: 0) {
+                        ForEach(kids) { k in
+                            Button { store.selection = k.id } label: {
+                                HStack(spacing: 8) {
+                                    StatusIcon(status: k.status)
+                                    Text(k.title).lineLimit(2).strikethrough(k.isClosed).foregroundStyle(k.isClosed ? .secondary : .primary)
+                                    Spacer(minLength: 6)
+                                    AssigneeLabel(issue: k)
+                                    DueBadge(issue: k)
+                                    PriorityBadge(priority: k.priority)
+                                }
+                                .padding(.horizontal, 10).padding(.vertical, 7).contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            if k.id != kids.last?.id { Divider() }
+                        }
+                    }
+                }
+            }
+            Button { store.presentNewIssue(parent: issue.id) } label: { Label("Add Child Issue", systemImage: "plus") }
+                .controlSize(.small)
         }
     }
 
@@ -98,34 +301,60 @@ struct IssueDetail: View {
     private func relations(_ name: String, _ items: [Related]?) -> some View {
         if let items, !items.isEmpty {
             section(name) {
-                ForEach(items) { r in
-                    Button { store.selection = r.id } label: {
-                        HStack { StatusIcon(status: r.status); Text(r.title); Text(r.id).font(.caption.monospaced()).foregroundStyle(.tertiary) }
-                    }.buttonStyle(.plain)
+                card(padding: 4) {
+                    VStack(spacing: 0) {
+                        ForEach(items) { r in
+                            Button { store.selection = r.id } label: {
+                                HStack(spacing: 8) {
+                                    StatusIcon(status: r.status)
+                                    Text(r.title).lineLimit(2)
+                                    Spacer(minLength: 6)
+                                    Text(r.id).font(.caption.monospaced()).foregroundStyle(.tertiary)
+                                }
+                                .padding(.horizontal, 10).padding(.vertical, 7).contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            if r.id != items.last?.id { Divider() }
+                        }
+                    }
                 }
             }
         }
     }
 
+    // MARK: Comments
+
     private var comments: some View {
-        section("Comments") {
-            ForEach(issue.comments ?? []) { c in
-                VStack(alignment: .leading, spacing: 2) {
-                    HStack {
-                        Text(c.author ?? "unknown").font(.caption.bold())
-                        if let d = c.createdAt?.beadsDate { Text(d, format: .relative(presentation: .named)).font(.caption).foregroundStyle(.tertiary) }
+        let list = issue.comments ?? []
+        return section(list.isEmpty ? "Comments" : "Comments (\(list.count))") {
+            ForEach(list) { c in
+                HStack(alignment: .top, spacing: 10) {
+                    Text(initials(c.author))
+                        .font(.caption.weight(.semibold)).foregroundStyle(.white)
+                        .frame(width: 26, height: 26).background(.tint, in: Circle())
+                    VStack(alignment: .leading, spacing: 3) {
+                        HStack(spacing: 6) {
+                            Text(c.author ?? "unknown").font(.callout.weight(.semibold))
+                            if let d = c.createdAt?.beadsDate { Text(d, format: .relative(presentation: .named)).font(.caption).foregroundStyle(.tertiary) }
+                        }
+                        rich(c.text, compact: true)
                     }
-                    Text(c.text).textSelection(.enabled)
+                    Spacer(minLength: 0)
                 }
-                .padding(8).frame(maxWidth: .infinity, alignment: .leading)
-                .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 6))
             }
-            HStack(alignment: .bottom) {
-                TextField("Add a comment…", text: $newComment, axis: .vertical).textFieldStyle(.roundedBorder).lineLimit(1...5)
+            HStack(alignment: .bottom, spacing: 8) {
+                TextField("Add a comment…", text: $newComment, axis: .vertical)
+                    .textFieldStyle(.roundedBorder).lineLimit(1...6)
                 Button("Post") { store.comment(issue.id, newComment); newComment = "" }
+                    .keyboardShortcut(.return, modifiers: .command)
                     .disabled(newComment.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
         }
+    }
+
+    private func initials(_ name: String?) -> String {
+        let parts = (name ?? "?").split(separator: " ").prefix(2)
+        return parts.compactMap { $0.first.map(String.init) }.joined().uppercased()
     }
 
     private var closeSheet: some View {
@@ -141,12 +370,30 @@ struct IssueDetail: View {
         }.padding(20).frame(width: 380)
     }
 
-    private func section<C: View>(_ name: String, @ViewBuilder _ content: () -> C) -> some View {
+    // MARK: Building blocks
+
+    /// Quiet, consistent section header; optional control on the right.
+    private func section<C: View, T: View>(_ name: String, @ViewBuilder trailing: () -> T = { EmptyView() }, @ViewBuilder _ content: () -> C) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text(name).font(.subheadline.weight(.semibold)).foregroundStyle(.secondary)
+            HStack {
+                Text(name.uppercased()).font(.caption.weight(.semibold)).tracking(0.6).foregroundStyle(.secondary)
+                Spacer()
+                trailing()
+            }
             content()
         }
     }
+
+    private func card<C: View>(padding: CGFloat = 12, @ViewBuilder _ content: () -> C) -> some View {
+        content()
+            .padding(padding)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 10))
+            .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(.separator.opacity(0.6)))
+    }
+
+    /// Markdown from bd (descriptions, notes, comments), drawn block by block.
+    private func rich(_ s: String, compact: Bool = false) -> some View { MarkdownView(source: s, compact: compact) }
 }
 
 struct NewIssueSheet: View {
@@ -156,6 +403,10 @@ struct NewIssueSheet: View {
     @State private var type = "task"
     @State private var priority = 2
     @State private var desc = ""
+    @State private var assignee = ""
+    @State private var hasDue = false
+    @State private var due = Calendar.current.date(byAdding: .day, value: 7, to: .now) ?? .now
+    @State private var parent = ""
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -165,18 +416,34 @@ struct NewIssueSheet: View {
                 Picker("Type", selection: $type) { ForEach(issueTypes, id: \.self) { Text($0.capitalized).tag($0) } }
                 Picker("Priority", selection: $priority) { ForEach(0...4, id: \.self) { Text("P\($0)").tag($0) } }
             }
+            HStack {
+                TextField("Assignee", text: $assignee).textFieldStyle(.roundedBorder)
+                Picker("Epic", selection: $parent) {
+                    Text("None").tag("")
+                    ForEach(store.epics) { Text($0.title).tag($0.id) }
+                }
+            }
+            HStack {
+                Toggle("Due", isOn: $hasDue)
+                DatePicker("Due", selection: $due, displayedComponents: .date).labelsHidden().disabled(!hasDue)
+                Spacer()
+            }
             TextEditor(text: $desc).frame(height: 110)
                 .padding(4).background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 6))
             HStack {
                 Spacer()
                 Button("Cancel", role: .cancel) { dismiss() }
                 Button("Create") {
-                    store.create(title: title, type: type, priority: priority, description: desc)
+                    store.create(title: title, type: type, priority: priority, description: desc,
+                                 assignee: assignee.trimmingCharacters(in: .whitespaces),
+                                 due: hasDue ? due : nil, parent: parent.isEmpty ? nil : parent)
                     dismiss()
                 }
                 .keyboardShortcut(.defaultAction)
                 .disabled(title.trimmingCharacters(in: .whitespaces).isEmpty)
             }
-        }.padding(20).frame(width: 440)
+        }
+        .padding(20).frame(width: 460)
+        .onAppear { parent = store.newIssueParent ?? "" }
     }
 }

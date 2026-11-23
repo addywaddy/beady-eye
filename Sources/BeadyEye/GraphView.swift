@@ -82,7 +82,9 @@ struct GraphView: View {
     @AppStorage("graphConnectedOnly") private var connectedOnly = true
 
     var body: some View {
-        let g = GraphLayout(all: store.issues.filter(store.matchesSearch), showClosed: showClosed, connectedOnly: connectedOnly)
+        // Picking Closed or All in the sidebar means "include closed issues".
+        let wantsClosed = showClosed || store.sidebar == .filter(.closed) || store.sidebar == .filter(.all)
+        let g = GraphLayout(all: store.scoped.filter(store.matchesSearch), showClosed: wantsClosed, connectedOnly: connectedOnly)
         VStack(spacing: 0) {
             RefreshBanner()
             HStack(spacing: 16) {

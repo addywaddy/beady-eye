@@ -21,9 +21,18 @@ struct Issue: Identifiable, Hashable, Decodable {
     var dependencies: [Related]?
     var dependents: [Related]?
     var comments: [Comment]?
+    var parent: String?
+    var closedAt: String?
+    var closeReason: String?
+    var dueAt: String?
+    var deferUntil: String?
 
     enum CodingKeys: String, CodingKey {
-        case id, title, description, status, priority, assignee, owner, labels, notes, design
+        case id, title, description, status, priority, assignee, owner, labels, notes, design, parent
+        case dueAt = "due_at"
+        case closedAt = "closed_at"
+        case closeReason = "close_reason"
+        case deferUntil = "defer_until"
         case dependencies, dependents, comments
         case issueType = "issue_type"
         case createdAt = "created_at"
@@ -34,11 +43,30 @@ struct Issue: Identifiable, Hashable, Decodable {
         case commentCount = "comment_count"
     }
 
-    /// Only identity matters for list selection; detail is refetched.
-    static func == (a: Issue, b: Issue) -> Bool { a.id == b.id && a.updatedAt == b.updatedAt && a.status == b.status }
+    /// Compares everything the list, board and graph display, so a refresh redraws when any of it changes.
+    static func == (a: Issue, b: Issue) -> Bool {
+        a.id == b.id && a.updatedAt == b.updatedAt && a.status == b.status && a.title == b.title
+            && a.priority == b.priority && a.assignee == b.assignee && a.dueAt == b.dueAt && a.parent == b.parent
+            && a.labels == b.labels && a.deferUntil == b.deferUntil && a.description == b.description && a.closeReason == b.closeReason
+    }
     func hash(into h: inout Hasher) { h.combine(id) }
 
     var isClosed: Bool { status == "closed" }
+    var isEpic: Bool { issueType == "epic" }
+
+    var dueDate: Date? { dueAt?.beadsDate }
+    var deferDate: Date? { deferUntil?.beadsDate }
+
+    /// Overdue means the due *day* is before today, so something due today isn't flagged until tomorrow.
+    var isOverdue: Bool {
+        guard !isClosed, let d = dueDate else { return false }
+        return d < Calendar.current.startOfDay(for: .now)
+    }
+    var isDueSoon: Bool {
+        guard !isClosed, !isOverdue, let d = dueDate else { return false }
+        let cal = Calendar.current
+        return cal.startOfDay(for: d) <= cal.date(byAdding: .day, value: 2, to: cal.startOfDay(for: .now))!
+    }
 }
 
 /// A dependency/dependent. `bd show` returns full issue objects; `bd list` returns bare edge
