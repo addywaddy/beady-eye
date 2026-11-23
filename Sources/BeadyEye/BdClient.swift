@@ -242,6 +242,9 @@ actor BdClient {
     }
     func forget(_ key: String) async throws { try await run(["forget", key, "--json"]) }
 
+    /// Permanent. Without --force bd only previews, so the app confirms first and then forces.
+    func delete(_ id: String) async throws { try await run(["delete", id, "--force", "--json"]) }
+
     func comment(_ id: String, text: String) async throws { try await run(["comment", id, text, "--json"]) }
     func addLabel(_ id: String, _ label: String) async throws { try await run(["label", "add", id, label, "--json"]) }
     func removeLabel(_ id: String, _ label: String) async throws { try await run(["label", "remove", id, label, "--json"]) }

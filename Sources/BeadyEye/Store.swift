@@ -477,6 +477,13 @@ final class Store {
     func setParent(_ id: String, _ parent: String?) { perform { try await $0.update(id, ["--parent", parent ?? ""]) } }
     func close(_ id: String, reason: String?) { perform { try await $0.close(id, reason: reason) } }
     func reopen(_ id: String) { perform { try await $0.reopen(id) } }
+    /// Deletes for good. The card disappears at once and the selection is cleared.
+    func delete(_ id: String) {
+        issues.removeAll { $0.id == id }
+        if selection == id { selection = nil; detail = nil }
+        perform { try await $0.delete(id) }
+    }
+
     func comment(_ id: String, _ text: String) { perform { try await $0.comment(id, text: text) } }
     func addLabel(_ id: String, _ l: String) { perform { try await $0.addLabel(id, l) } }
     func removeLabel(_ id: String, _ l: String) { perform { try await $0.removeLabel(id, l) } }

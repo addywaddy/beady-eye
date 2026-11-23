@@ -12,6 +12,7 @@ struct IssueDetail: View {
     @State private var otherName = ""
     @State private var closeReason = ""
     @State private var showClose = false
+    @State private var confirmDelete = false
     @FocusState private var titleFocused: Bool
 
     var body: some View {
@@ -41,6 +42,9 @@ struct IssueDetail: View {
         .onChange(of: issue.title) { _, new in if !titleFocused { title = new } }
         .onChange(of: issue.description) { _, new in if !editingDesc { desc = new ?? "" } }
         .sheet(isPresented: $showClose) { closeSheet }
+        .confirmationDialog("Delete “\(issue.title)”?", isPresented: $confirmDelete, titleVisibility: .visible) {
+            Button("Delete", role: .destructive) { store.delete(issue.id) }
+        } message: { Text(deleteWarning) }
     }
 
     // MARK: Header
@@ -59,6 +63,8 @@ struct IssueDetail: View {
                 } else {
                     Button("Close…") { showClose = true }
                 }
+                Button { confirmDelete = true } label: { Image(systemName: "trash") }
+                    .help("Delete this issue permanently")
             }
             TextField("Title", text: $title, axis: .vertical)
                 .textFieldStyle(.plain).font(.title.bold())
@@ -66,6 +72,16 @@ struct IssueDetail: View {
                 .onSubmit(commitTitle)
                 .onChange(of: titleFocused) { _, focused in if !focused { commitTitle() } }
         }
+    }
+
+    /// bd removes the issue and its links for good; say what else it touches.
+    private var deleteWarning: String {
+        var parts = ["This permanently deletes \(issue.id) and can't be undone from the app."]
+        let blocks = (issue.dependents ?? []).filter { $0.dependencyType != "parent-child" }.count
+        let kids = store.children(of: issue.id).count
+        if blocks > 0 { parts.append("\(blocks) other issue\(blocks == 1 ? "" : "s") depend\(blocks == 1 ? "s" : "") on it and will lose that link.") }
+        if kids > 0 { parts.append("\(kids) child issue\(kids == 1 ? "" : "s") will no longer have a parent.") }
+        return parts.joined(separator: " ")
     }
 
     private func commitTitle() {
