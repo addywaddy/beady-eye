@@ -225,6 +225,14 @@ final class Store {
     /// Everyone with an issue except you, who gets a pinned row of your own.
     var otherAssignees: [String] { assignees.filter { $0 != me } }
 
+    /// An issue's change history, newest first. Events only add "who", so their failure isn't fatal.
+    func history(for id: String, limit: Int) async throws -> (entries: [HistoryEntry], events: [AuditEvent]) {
+        guard let client else { throw BdError(message: "No project is open.") }
+        let entries = try await client.history(id, limit: limit)
+        let events = (try? await client.events(id)) ?? []
+        return (entries, events)
+    }
+
     func presentNewIssue(parent: String? = nil) { newIssueParent = parent; showNewIssue = true }
 
     func count(_ f: Filter) -> Int { issues(for: f).count }

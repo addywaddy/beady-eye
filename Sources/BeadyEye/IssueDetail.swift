@@ -29,6 +29,8 @@ struct IssueDetail: View {
                     section("Notes") { card { rich(n) } }
                 }
                 comments
+                Divider()
+                HistorySection(issue: issue)
             }
             .padding(20)
             .frame(maxWidth: .infinity, alignment: .leading)

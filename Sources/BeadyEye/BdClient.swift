@@ -127,6 +127,16 @@ actor BdClient {
         Set(try await decode([Issue].self, ["ready", "-n", "0"]).map(\.id))
     }
 
+    /// The issue's state at each commit that touched the database, newest first (`limit` 0 = all).
+    func history(_ id: String, limit: Int) async throws -> [HistoryEntry] {
+        try await decode([HistoryEntry].self, ["history", id, "--limit", String(limit)])
+    }
+
+    /// Audit events (created / updated / closed …) with the actor who did them.
+    func events(_ id: String) async throws -> [AuditEvent] {
+        try await decode([AuditEvent].self, ["history", id, "--events"])
+    }
+
     func show(_ id: String) async throws -> Issue {
         guard let issue = try await decode([Issue].self, ["show", id]).first else { throw BdError(message: "Issue \(id) not found") }
         return issue
