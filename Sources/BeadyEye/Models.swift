@@ -41,6 +41,8 @@ struct Issue: Identifiable, Hashable, Decodable {
     var isClosed: Bool { status == "closed" }
 }
 
+/// A dependency/dependent. `bd show` returns full issue objects; `bd list` returns bare edge
+/// records (`depends_on_id`, `type`), so every field except the id is tolerant of absence.
 struct Related: Identifiable, Hashable, Decodable {
     let id: String
     var title: String
@@ -50,9 +52,21 @@ struct Related: Identifiable, Hashable, Decodable {
     var dependencyType: String?
 
     enum CodingKeys: String, CodingKey {
-        case id, title, status, priority
+        case id, title, status, priority, type
+        case dependsOnId = "depends_on_id"
         case issueType = "issue_type"
         case dependencyType = "dependency_type"
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decodeIfPresent(String.self, forKey: .id) ?? c.decode(String.self, forKey: .dependsOnId)
+        title = try c.decodeIfPresent(String.self, forKey: .title) ?? id
+        status = try c.decodeIfPresent(String.self, forKey: .status) ?? "open"
+        priority = try c.decodeIfPresent(Int.self, forKey: .priority)
+        issueType = try c.decodeIfPresent(String.self, forKey: .issueType)
+        dependencyType = try c.decodeIfPresent(String.self, forKey: .dependencyType)
+            ?? c.decodeIfPresent(String.self, forKey: .type)
     }
 }
 
