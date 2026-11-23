@@ -296,7 +296,11 @@ struct IssueRow: View {
             PriorityBadge(priority: issue.priority)
         }
         .padding(.vertical, 2)
-        .contextMenu { AssigneeActions(issue: issue) }
+        .contextMenu {
+            PriorityActions(issue: issue)
+            Divider()
+            AssigneeActions(issue: issue)
+        }
     }
 }
 

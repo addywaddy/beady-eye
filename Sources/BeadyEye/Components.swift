@@ -124,6 +124,23 @@ struct AssigneeActions: View {
     }
 }
 
+/// "Priority ▸ P0–P4" for context menus. Priorities are bd's five fixed levels, not a rank.
+struct PriorityActions: View {
+    @Environment(Store.self) private var store
+    let issue: Issue
+    private static let names = ["Critical", "High", "Medium", "Low", "Backlog"]
+    var body: some View {
+        Menu("Priority", systemImage: "flag") {
+            ForEach(0...4, id: \.self) { p in
+                Button { store.setPriority(issue.id, p) } label: {
+                    if issue.priority == p { Label("P\(p) · \(Self.names[p])", systemImage: "checkmark") }
+                    else { Text("P\(p) · \(Self.names[p])") }
+                }
+            }
+        }
+    }
+}
+
 /// Left-to-right layout that wraps onto new lines, for label chips.
 struct FlowLayout: Layout {
     var spacing: CGFloat = 6

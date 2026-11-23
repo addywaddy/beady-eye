@@ -103,6 +103,10 @@ private struct BoardCard: View {
         .contentShape(RoundedRectangle(cornerRadius: 8))
         .onTapGesture { store.selection = issue.id }
         .draggable(issue.id)
-        .contextMenu { AssigneeActions(issue: issue) }
+        .contextMenu {
+            PriorityActions(issue: issue)
+            Divider()
+            AssigneeActions(issue: issue)
+        }
     }
 }

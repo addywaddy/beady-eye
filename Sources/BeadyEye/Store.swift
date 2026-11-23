@@ -448,7 +448,10 @@ final class Store {
     }
 
     func setStatus(_ id: String, _ s: String) { perform { try await $0.setStatus(id, s) } }
-    func setPriority(_ id: String, _ p: Int) { perform { try await $0.update(id, ["-p", String(p)]) } }
+    func setPriority(_ id: String, _ p: Int) {
+        applyLocally(id) { $0.priority = p }
+        perform { try await $0.update(id, ["-p", String(p)]) }
+    }
     func setTitle(_ id: String, _ t: String) {
         applyLocally(id) { $0.title = t }
         perform { try await $0.update(id, ["--title", t]) }
