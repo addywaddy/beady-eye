@@ -169,3 +169,10 @@ extension String {
         return f.date(from: self)
     }
 }
+
+/// One `bd remember` note.
+struct Memory: Identifiable, Hashable {
+    let key: String
+    let text: String
+    var id: String { key }
+}

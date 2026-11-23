@@ -47,12 +47,14 @@ struct ContentView: View {
                                 .help(store.showEpicsOnBoard ? "Hide epics on the board" : "Show epics on the board")
                         }
                     }
+                    ToolbarItem { Button { store.showMemories = true } label: { Label("Memories", systemImage: "brain") }.help("Notes stored with bd remember") }
                     ToolbarItem { Button { store.presentNewIssue() } label: { Label("New Issue", systemImage: "plus") } }
                     ToolbarItem { Button { Task { await store.refresh() } } label: { Label("Refresh", systemImage: "arrow.clockwise") } }
                 }
             }
         }
         .sheet(isPresented: $store.showNewIssue) { NewIssueSheet() }
+        .sheet(isPresented: $store.showMemories) { MemoriesView() }
         .alert("bd error", isPresented: Binding(get: { store.error != nil }, set: { if !$0 { store.error = nil } })) {
             Button("OK") { store.error = nil }
         } message: { Text(store.error ?? "") }

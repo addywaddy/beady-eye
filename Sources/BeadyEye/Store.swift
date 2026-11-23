@@ -95,6 +95,9 @@ final class Store {
     var me: String?             // the name bd uses for "you"; claims are recorded under it
     var meEmail: String?        // git user.email, which bd stores as an issue's `owner`
     var showNewIssue = false
+    var showMemories = false
+    var memories: [Memory] = []
+    var memoriesError: String?
     var newIssueParent: String?
     /// Whether epics appear as cards on the board (their children always do). On by default.
     var showEpicsOnBoard: Bool = UserDefaults.standard.object(forKey: "showEpicsOnBoard") as? Bool ?? true {
@@ -330,6 +333,29 @@ final class Store {
     var extraStatuses: [StatusInfo] {
         let present = Set(issues.map(\.status))
         return columnStatuses.filter { !Self.coreStatuses.contains($0.name) && present.contains($0.name) }
+    }
+
+    func loadMemories() async {
+        guard let client else { return }
+        do { let m = try await client.memories(); if self.client === client { memories = m; memoriesError = nil } }
+        catch { memoriesError = error.localizedDescription }
+    }
+
+    func remember(_ text: String, key: String? = nil) {
+        guard let client else { return }
+        Task {
+            do { try await client.remember(text, key: key) } catch { memoriesError = error.localizedDescription }
+            await loadMemories()
+        }
+    }
+
+    func forget(_ key: String) {
+        guard let client else { return }
+        memories.removeAll { $0.key == key }
+        Task {
+            do { try await client.forget(key) } catch { memoriesError = error.localizedDescription }
+            await loadMemories()
+        }
     }
 
     func presentNewIssue(parent: String? = nil) { newIssueParent = parent; showNewIssue = true }

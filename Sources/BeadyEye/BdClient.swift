@@ -17,7 +17,7 @@ enum CallLog {
         if let h = try? FileHandle(forWritingTo: url) { h.seekToEndOfFile(); h.write(data); try? h.close() }
         else { try? data.write(to: url) }
     }
-    static let readOnly: Set<String> = ["list", "ready", "show"]
+    static let readOnly: Set<String> = ["list", "ready", "show", "memories", "recall"]
 }
 
 struct BdError: LocalizedError {
@@ -224,6 +224,24 @@ actor BdClient {
         try await run(a + ["--json"])
     }
     func reopen(_ id: String) async throws { try await run(["reopen", id, "--json"]) }
+    /// `bd memories`: persistent notes agents (and you) store with `bd remember`. A flat key-to-text object
+    /// with a `schema_version` entry that isn't a memory.
+    func memories() async throws -> [Memory] {
+        let data = try await run(["memories", "--json"])
+        guard let root = try JSONSerialization.jsonObject(with: data) as? [String: Any] else { return [] }
+        return root.compactMap { k, v in
+            guard k != "schema_version", let text = v as? String else { return nil }
+            return Memory(key: k, text: text)
+        }.sorted { $0.key < $1.key }
+    }
+    /// With a key, an existing memory is updated in place.
+    func remember(_ text: String, key: String?) async throws {
+        var args = ["remember", text]
+        if let key, !key.isEmpty { args += ["--key", key] }
+        try await run(args + ["--json"])
+    }
+    func forget(_ key: String) async throws { try await run(["forget", key, "--json"]) }
+
     func comment(_ id: String, text: String) async throws { try await run(["comment", id, text, "--json"]) }
     func addLabel(_ id: String, _ label: String) async throws { try await run(["label", "add", id, label, "--json"]) }
     func removeLabel(_ id: String, _ label: String) async throws { try await run(["label", "remove", id, label, "--json"]) }
