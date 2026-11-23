@@ -91,6 +91,7 @@ final class Store {
     var sidebar: SidebarItem = .filter(.all)
     var assigneeFilter: Set<String> = []   // sidebar assignee toggles; "" is Unassigned; empty means anyone
     var epicFilter: Set<String> = []   // sidebar epic toggles (epic ids); empty means any parent
+    var labelFilter: Set<String> = []   // sidebar label toggles; an issue matches if it has any of them
     var statusFilter: Set<String> = []   // sidebar status toggles; empty means every status
     var me: String?             // the name bd uses for "you"; claims are recorded under it
     var meEmail: String?        // git user.email, which bd stores as an issue's `owner`
@@ -178,6 +179,7 @@ final class Store {
         issues = []; readyIDs = []; blockedBy = [:]; detail = nil; selection = nil; error = nil; refreshError = nil
         sidebar = .filter(.all)
         statusFilter = []
+        labelFilter = []
         epicFilter = []
         assigneeFilter = []
         me = nil; meEmail = nil
@@ -244,6 +246,13 @@ final class Store {
         (statusFilter.isEmpty || statusFilter.contains(i.status))
             && (assigneeFilter.isEmpty || assigneeFilter.contains(i.assignee ?? ""))
             && (epicFilter.isEmpty || epicFilter.contains(i.parent ?? ""))
+            && (labelFilter.isEmpty || !labelFilter.isDisjoint(with: i.labels ?? []))
+    }
+
+    var labels: [String] { Set(issues.flatMap { $0.labels ?? [] }).sorted() }
+    func count(label: String) -> Int { issues.filter { ($0.labels ?? []).contains(label) }.count }
+    func toggleLabel(_ l: String) {
+        if labelFilter.contains(l) { labelFilter.remove(l) } else { labelFilter.insert(l) }
     }
 
     func toggleEpic(_ id: String) {

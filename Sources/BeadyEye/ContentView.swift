@@ -151,6 +151,23 @@ struct Sidebar: View {
                     }
                 }
             }
+            if !store.labels.isEmpty {
+                Section("Labels") {
+                    ForEach(store.labels, id: \.self) { l in
+                        Button { store.toggleLabel(l) } label: {
+                            HStack {
+                                Label(l, systemImage: "tag").lineLimit(1)
+                                Spacer()
+                                Text("\(store.count(label: l))").foregroundStyle(.secondary)
+                                Image(systemName: "checkmark").opacity(store.labelFilter.contains(l) ? 1 : 0)
+                            }
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .help("Show only issues labelled “\(l)”. Select several to match any of them.")
+                    }
+                }
+            }
             Section("Assignees") {
                 if let me = store.me {
                     AssigneeRow(name: me, filterKey: me, title: "Me (\(me))", subtitle: store.meEmail,
