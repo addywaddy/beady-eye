@@ -89,11 +89,17 @@ final class Store {
     var statuses: [StatusInfo] = StatusInfo.builtIn { didSet { StatusInfo.known = statuses } }
     var types: [String] = fallbackIssueTypes
     var sidebar: SidebarItem = .filter(.all)
+    var assigneeFilter: Set<String> = []   // sidebar assignee toggles; "" is Unassigned; empty means anyone
+    var epicFilter: Set<String> = []   // sidebar epic toggles (epic ids); empty means any parent
     var statusFilter: Set<String> = []   // sidebar status toggles; empty means every status
     var me: String?             // the name bd uses for "you"; claims are recorded under it
     var meEmail: String?        // git user.email, which bd stores as an issue's `owner`
     var showNewIssue = false
     var newIssueParent: String?
+    /// Whether epics appear as cards on the board (their children always do). On by default.
+    var showEpicsOnBoard: Bool = UserDefaults.standard.object(forKey: "showEpicsOnBoard") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(showEpicsOnBoard, forKey: "showEpicsOnBoard") }
+    }
     var viewMode: ViewMode = ViewMode(rawValue: UserDefaults.standard.string(forKey: "viewMode") ?? "") ?? .list {
         didSet { UserDefaults.standard.set(viewMode.rawValue, forKey: "viewMode") }
     }
@@ -169,6 +175,8 @@ final class Store {
         issues = []; readyIDs = []; blockedBy = [:]; detail = nil; selection = nil; error = nil; refreshError = nil
         sidebar = .filter(.all)
         statusFilter = []
+        epicFilter = []
+        assigneeFilter = []
         me = nil; meEmail = nil
         guard let ws = workspace else { client = nil; return }
         let c = BdClient(workspace: ws)
@@ -229,7 +237,21 @@ final class Store {
 
     var visible: [Issue] { issues(for: sidebar).filter(matchesStatusFilter).filter(matchesSearch).sorted(by: byPriority) }
 
-    func matchesStatusFilter(_ i: Issue) -> Bool { statusFilter.isEmpty || statusFilter.contains(i.status) }
+    func matchesStatusFilter(_ i: Issue) -> Bool {
+        (statusFilter.isEmpty || statusFilter.contains(i.status))
+            && (assigneeFilter.isEmpty || assigneeFilter.contains(i.assignee ?? ""))
+            && (epicFilter.isEmpty || epicFilter.contains(i.parent ?? ""))
+    }
+
+    func toggleEpic(_ id: String) {
+        if epicFilter.contains(id) { epicFilter.remove(id) } else { epicFilter.insert(id) }
+    }
+
+    func toggleAssignee(_ name: String) {
+        if assigneeFilter.contains(name) { assigneeFilter.remove(name) } else { assigneeFilter.insert(name) }
+    }
+
+    func count(assignee name: String) -> Int { issues.filter { ($0.assignee ?? "") == name }.count }
 
     /// What the board and graph show: the same selection as the list, so "Open" fills only the Open
     /// column and "All" (the default) fills every column.
@@ -242,7 +264,7 @@ final class Store {
 
     /// Issues in one board column (a bd category), honouring the sidebar scope, status toggles and search box.
     func column(category cat: String) -> [Issue] {
-        scoped.filter { category(of: $0.status) == cat && matchesStatusFilter($0) && matchesSearch($0) }.sorted(by: byPriority)
+        scoped.filter { category(of: $0.status) == cat && (showEpicsOnBoard || !$0.isEpic) && matchesStatusFilter($0) && matchesSearch($0) }.sorted(by: byPriority)
     }
 
     func toggleStatus(_ name: String) {

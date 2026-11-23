@@ -41,6 +41,12 @@ struct ContentView: View {
                         }
                         .pickerStyle(.segmented)
                     }
+                    if store.viewMode == .board {
+                        ToolbarItem {
+                            Toggle(isOn: $store.showEpicsOnBoard) { Label("Epics", systemImage: "square.stack.3d.up") }
+                                .help(store.showEpicsOnBoard ? "Hide epics on the board" : "Show epics on the board")
+                        }
+                    }
                     ToolbarItem { Button { store.presentNewIssue() } label: { Label("New Issue", systemImage: "plus") } }
                     ToolbarItem { Button { Task { await store.refresh() } } label: { Label("Refresh", systemImage: "arrow.clockwise") } }
                 }
@@ -129,38 +135,62 @@ struct Sidebar: View {
                 Section("Epics") {
                     ForEach(store.epics) { e in
                         let p = store.progress(of: e.id)
-                        Label(e.title, systemImage: "square.stack.3d.up").lineLimit(1)
-                            .badge(p.total == 0 ? nil : Text("\(p.done)/\(p.total)"))
-                            .tag(SidebarItem.epic(e.id))
+                        Button { store.toggleEpic(e.id) } label: {
+                            HStack {
+                                Label(e.title, systemImage: "square.stack.3d.up").lineLimit(1)
+                                Spacer()
+                                if p.total > 0 { Text("\(p.done)/\(p.total)").foregroundStyle(.secondary) }
+                                Image(systemName: "checkmark").opacity(store.epicFilter.contains(e.id) ? 1 : 0)
+                            }
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .help("Show only this epic's issues. Select several to combine.")
                     }
                 }
             }
             Section("Assignees") {
                 if let me = store.me {
-                    Label {
-                        VStack(alignment: .leading, spacing: 1) {
-                            Text("Me (\(me))").lineLimit(1)
-                            if let email = store.meEmail {
-                                Text(email).font(.caption2).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
-                            }
-                        }
-                    } icon: { Image(systemName: "person.crop.circle.fill") }
-                    .badge(store.issues(for: .mine).count)
-                    .tag(SidebarItem.mine)
-                    .help(store.meEmail.map { "\(me) <\($0)>" } ?? me)
+                    AssigneeRow(name: me, filterKey: me, title: "Me (\(me))", subtitle: store.meEmail,
+                                symbol: "person.crop.circle.fill")
                 }
                 ForEach(store.otherAssignees, id: \.self) { a in
-                    Label(a, systemImage: "person").lineLimit(1)
-                        .badge(store.issues(for: .assignee(a)).count)
-                        .tag(SidebarItem.assignee(a))
+                    AssigneeRow(name: a, filterKey: a, title: a, subtitle: nil, symbol: "person")
                 }
-                Label("Unassigned", systemImage: "person.slash")
-                    .badge(store.issues(for: .unassigned).count)
-                    .tag(SidebarItem.unassigned)
+                AssigneeRow(name: "", filterKey: "", title: "Unassigned", subtitle: nil, symbol: "person.slash")
             }
         }
         .listStyle(.sidebar)
         .safeAreaInset(edge: .top) { ConnectionSwitcher() }
+    }
+}
+
+/// A toggle row: click to add this assignee to the filter, click again to remove it.
+private struct AssigneeRow: View {
+    @Environment(Store.self) private var store
+    let name: String
+    let filterKey: String
+    let title: String
+    let subtitle: String?
+    let symbol: String
+
+    var body: some View {
+        Button { store.toggleAssignee(filterKey) } label: {
+            HStack {
+                Label {
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(title).lineLimit(1)
+                        if let subtitle { Text(subtitle).font(.caption2).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle) }
+                    }
+                } icon: { Image(systemName: symbol) }
+                Spacer()
+                Text("\(store.count(assignee: name))").foregroundStyle(.secondary)
+                Image(systemName: "checkmark").opacity(store.assigneeFilter.contains(filterKey) ? 1 : 0)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(subtitle.map { "\(name) <\($0)>" } ?? "Show only issues assigned to \(title). Select several to combine.")
     }
 }
 

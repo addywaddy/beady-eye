@@ -85,7 +85,7 @@ private struct BoardCard: View {
                 }
             }
             if issue.isEpic { let p = store.progress(of: issue.id); EpicProgress(done: p.done, total: p.total) }
-            if let pid = issue.parent, let parent = store.issue(pid), store.sidebar != .epic(pid) {
+            if let pid = issue.parent, let parent = store.issue(pid), !store.epicFilter.contains(pid) {
                 Label(parent.title, systemImage: "square.stack.3d.up").font(.caption).lineLimit(1).foregroundStyle(.secondary)
             }
             HStack {
@@ -97,7 +97,7 @@ private struct BoardCard: View {
         }
         .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.background.secondary, in: RoundedRectangle(cornerRadius: 8))
+        .background(issue.isEpic ? AnyShapeStyle(.tint.opacity(0.1)) : AnyShapeStyle(.background.secondary), in: RoundedRectangle(cornerRadius: 8))
         .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(selected ? AnyShapeStyle(.tint) : AnyShapeStyle(.separator), lineWidth: selected ? 2 : 1))
         .contentShape(RoundedRectangle(cornerRadius: 8))
         .onTapGesture { store.selection = issue.id }
