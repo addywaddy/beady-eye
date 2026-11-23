@@ -48,6 +48,7 @@ struct Issue: Identifiable, Hashable, Decodable {
         a.id == b.id && a.updatedAt == b.updatedAt && a.status == b.status && a.title == b.title
             && a.priority == b.priority && a.assignee == b.assignee && a.dueAt == b.dueAt && a.parent == b.parent
             && a.labels == b.labels && a.deferUntil == b.deferUntil && a.description == b.description && a.closeReason == b.closeReason
+            && a.comments == b.comments && a.notes == b.notes && a.dependencies == b.dependencies && a.dependents == b.dependents
     }
     func hash(into h: inout Hasher) { h.combine(id) }
 

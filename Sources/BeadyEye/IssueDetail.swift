@@ -368,12 +368,26 @@ struct IssueDetail: View {
                     Spacer(minLength: 0)
                 }
             }
-            HStack(alignment: .bottom, spacing: 8) {
-                TextField("Add a comment…", text: $newComment, axis: .vertical)
-                    .textFieldStyle(.roundedBorder).lineLimit(1...6)
-                Button("Post") { store.comment(issue.id, newComment); newComment = "" }
-                    .keyboardShortcut(.return, modifiers: .command)
-                    .disabled(newComment.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            VStack(alignment: .trailing, spacing: 6) {
+                TextEditor(text: $newComment)
+                    .font(.body)
+                    .scrollContentBackground(.hidden)
+                    .padding(6)
+                    .frame(minHeight: 70, maxHeight: 200)
+                    .background(.background, in: RoundedRectangle(cornerRadius: 6))
+                    .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(.separator))
+                    .overlay(alignment: .topLeading) {
+                        if newComment.isEmpty {
+                            Text("Add a comment… (Return for a new line, ⌘↩ to post)")
+                                .foregroundStyle(.tertiary).padding(.horizontal, 11).padding(.vertical, 6).allowsHitTesting(false)
+                        }
+                    }
+                Button("Post") {
+                    store.comment(issue.id, newComment.trimmingCharacters(in: .whitespacesAndNewlines))
+                    newComment = ""
+                }
+                .keyboardShortcut(.return, modifiers: .command)
+                .disabled(newComment.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
         }
     }

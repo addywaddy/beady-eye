@@ -173,7 +173,7 @@ actor BdClient {
     }
 
     func show(_ id: String) async throws -> Issue {
-        guard let issue = try await decode([Issue].self, ["show", id]).first else { throw BdError(message: "Issue \(id) not found") }
+        guard let issue = try await decode([Issue].self, ["show", id, "--include-comments", "--include-dependents"]).first else { throw BdError(message: "Issue \(id) not found") }
         return issue
     }
 
