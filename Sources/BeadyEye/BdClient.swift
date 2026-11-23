@@ -18,20 +18,23 @@ actor BdClient {
     // MARK: Locating bd (GUI apps don't inherit the shell PATH)
 
     static func locateBd() -> String? {
-        let home = NSHomeDirectory()
-        let candidates = ["\(home)/.local/bin/bd", "/opt/homebrew/bin/bd", "/usr/local/bin/bd", "\(home)/go/bin/bd"]
-        if let hit = candidates.first(where: { FileManager.default.isExecutableFile(atPath: $0) }) { return hit }
+        // Prefer whatever the user's login shell runs, so the app and the terminal agree
+        // (there can be several installs, e.g. an old ~/.local/bin/bd next to Homebrew's).
         let p = Process()
         p.executableURL = URL(fileURLWithPath: "/bin/zsh")
         p.arguments = ["-lc", "command -v bd"]
         let pipe = Pipe()
         p.standardOutput = pipe
         p.standardError = FileHandle.nullDevice
-        try? p.run()
-        p.waitUntilExit()
-        let out = String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        return out.isEmpty ? nil : out
+        if (try? p.run()) != nil {
+            p.waitUntilExit()
+            let out = String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            if FileManager.default.isExecutableFile(atPath: out) { return out }
+        }
+        let home = NSHomeDirectory()
+        return ["/opt/homebrew/bin/bd", "/usr/local/bin/bd", "\(home)/.local/bin/bd", "\(home)/go/bin/bd"]
+            .first { FileManager.default.isExecutableFile(atPath: $0) }
     }
 
     // MARK: Running
@@ -47,7 +50,7 @@ actor BdClient {
             p.arguments = args
             p.currentDirectoryURL = dir
             var env = ProcessInfo.processInfo.environment
-            env["PATH"] = "\(NSHomeDirectory())/.local/bin:/opt/homebrew/bin:/usr/local/bin:" + (env["PATH"] ?? "/usr/bin:/bin")
+            env["PATH"] = "\((bd as NSString).deletingLastPathComponent):/opt/homebrew/bin:/usr/local/bin:" + (env["PATH"] ?? "/usr/bin:/bin")
             env["NO_COLOR"] = "1"
             p.environment = env
             let out = Pipe(), err = Pipe()
@@ -64,7 +67,10 @@ actor BdClient {
                     if proc.terminationStatus == 0 {
                         cont.resume(returning: buf.out)
                     } else {
-                        let msg = String(decoding: buf.err.isEmpty ? buf.out : buf.err, as: UTF8.self)
+                        let raw = String(decoding: buf.err.isEmpty ? buf.out : buf.err, as: UTF8.self)
+                        let lines = raw.split(separator: "\n").map(String.init)
+                        let real = lines.filter { !$0.hasPrefix("Warning:") }   // e.g. "permissions 0750" noise
+                        let msg = (real.isEmpty ? lines : real).joined(separator: "\n")
                             .trimmingCharacters(in: .whitespacesAndNewlines)
                         cont.resume(throwing: BdError(message: msg.isEmpty ? "bd exited with status \(proc.terminationStatus)" : msg))
                     }
@@ -77,7 +83,16 @@ actor BdClient {
     private func decode<T: Decodable>(_ type: T.Type, _ args: [String]) async throws -> T {
         let data = try await run(args + ["--json"])
         do { return try JSONDecoder().decode(T.self, from: data) }
-        catch { throw BdError(message: "Unexpected bd output: \(error.localizedDescription)") }
+        catch let e as DecodingError {
+            let path = { (c: [CodingKey]) in c.map { $0.intValue.map { "[\($0)]" } ?? ".\($0.stringValue)" }.joined() }
+            let detail: String
+            switch e {
+            case .keyNotFound(let k, let ctx): detail = "missing key '\(k.stringValue)' at \(path(ctx.codingPath))"
+            case .typeMismatch(_, let ctx), .valueNotFound(_, let ctx), .dataCorrupted(let ctx): detail = "\(ctx.debugDescription) at \(path(ctx.codingPath))"
+            @unknown default: detail = e.localizedDescription
+            }
+            throw BdError(message: "Unexpected output from `bd \(args.first ?? "")`: \(detail)")
+        }
     }
 
     // MARK: Reads

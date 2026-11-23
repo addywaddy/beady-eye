@@ -16,13 +16,16 @@ struct BeadyEyeApp: App {
                 Button("New Issue…") { showNew = true }
                     .keyboardShortcut("n")
                     .disabled(store.workspace == nil)
-                Button("Open Project…") { store.chooseWorkspace() }
+                Button("Add Connection…") { store.addConnectionWithPanel() }
                     .keyboardShortcut("o")
-                Menu("Open Recent") {
-                    ForEach(store.recents, id: \.self) { url in
-                        Button(url.lastPathComponent) { store.workspace = url }
+                Menu("Switch Connection") {
+                    ForEach(store.connections) { c in
+                        Button { store.activeID = c.id } label: {
+                            if c.id == store.activeID { Label(c.name, systemImage: "checkmark") } else { Text(c.name) }
+                        }
                     }
                 }
+                .disabled(store.connections.isEmpty)
             }
             CommandGroup(after: .toolbar) {
                 Button("Refresh") { Task { await store.refresh() } }

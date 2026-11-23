@@ -1,0 +1,93 @@
+import SwiftUI
+
+struct BoardView: View {
+    @Environment(Store.self) private var store
+
+    /// Deferred is only worth a column when something is deferred.
+    private var columns: [Status] {
+        Status.allCases.filter { $0 != .deferred || !store.column($0.rawValue).isEmpty }
+    }
+
+    var body: some View {
+        ScrollView(.horizontal) {
+            HStack(alignment: .top, spacing: 12) {
+                ForEach(columns) { BoardColumn(status: $0) }
+            }
+            .padding(16)
+        }
+        .background(.background.secondary)
+        .safeAreaInset(edge: .top, spacing: 0) { RefreshBanner() }
+    }
+}
+
+private struct BoardColumn: View {
+    @Environment(Store.self) private var store
+    let status: Status
+    @State private var targeted = false
+
+    var body: some View {
+        let items = store.column(status.rawValue)
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                StatusIcon(status: status.rawValue)
+                Text(status.label).font(.headline)
+                Text("\(items.count)").font(.subheadline.monospacedDigit()).foregroundStyle(.secondary)
+                Spacer()
+            }
+            .padding(.horizontal, 4)
+            ScrollView {
+                LazyVStack(spacing: 8) {
+                    ForEach(items) { BoardCard(issue: $0, ready: store.readyIDs.contains($0.id)) }
+                }
+                .padding(2)
+            }
+            .scrollIndicators(.hidden)
+        }
+        .padding(10)
+        .frame(width: 270)
+        .frame(maxHeight: .infinity, alignment: .top)
+        .background(targeted ? AnyShapeStyle(.tint.opacity(0.15)) : AnyShapeStyle(.background),
+                    in: RoundedRectangle(cornerRadius: 10))
+        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(targeted ? AnyShapeStyle(.tint) : AnyShapeStyle(.separator)))
+        .dropDestination(for: String.self) { ids, _ in
+            ids.forEach { store.move($0, to: status.rawValue) }
+            return !ids.isEmpty
+        } isTargeted: { targeted = $0 }
+    }
+}
+
+private struct BoardCard: View {
+    @Environment(Store.self) private var store
+    let issue: Issue
+    let ready: Bool
+
+    /// Open but not ready means something it depends on is still unfinished.
+    private var waiting: Bool { issue.status == "open" && !ready }
+
+    var body: some View {
+        let selected = store.selection == issue.id
+        VStack(alignment: .leading, spacing: 6) {
+            Text(issue.title).lineLimit(3).fixedSize(horizontal: false, vertical: true)
+                .strikethrough(issue.isClosed).foregroundStyle(issue.isClosed ? .secondary : .primary)
+            HStack(spacing: 8) {
+                PriorityBadge(priority: issue.priority)
+                TypeBadge(type: issue.issueType)
+                Spacer(minLength: 0)
+                if ready { Image(systemName: "bolt.fill").foregroundStyle(.green).help("Ready to work on") }
+                if waiting { Image(systemName: "lock.fill").foregroundStyle(.orange).help("Waiting on a dependency") }
+            }
+            HStack {
+                Text(issue.id).font(.caption.monospaced()).foregroundStyle(.tertiary)
+                Spacer()
+                if let a = issue.assignee, !a.isEmpty { Text(a).font(.caption).foregroundStyle(.secondary) }
+            }
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.background.secondary, in: RoundedRectangle(cornerRadius: 8))
+        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(selected ? AnyShapeStyle(.tint) : AnyShapeStyle(.separator), lineWidth: selected ? 2 : 1))
+        .contentShape(RoundedRectangle(cornerRadius: 8))
+        .onTapGesture { store.selection = issue.id }
+        .draggable(issue.id)
+    }
+}
