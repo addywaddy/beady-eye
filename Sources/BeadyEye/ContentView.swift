@@ -24,16 +24,10 @@ struct ContentView: View {
                         } detail: {
                             // A plain resizable side panel, the same kind of container the list view's detail
                             // column is, rather than SwiftUI's .inspector.
-                            HSplitView {
-                                Group {
-                                    if store.viewMode == .board { BoardView() } else { GraphView() }
-                                }
-                                .frame(minWidth: 360, maxWidth: .infinity, maxHeight: .infinity)
-                                if store.selection != nil {
-                                    detailPane
-                                        .frame(minWidth: 320, idealWidth: 400, maxWidth: 560, maxHeight: .infinity)
-                                        .background(.background)
-                                }
+                            SidePanelLayout(showPanel: store.selection != nil) {
+                                if store.viewMode == .board { BoardView() } else { GraphView() }
+                            } panel: {
+                                detailPane
                             }
                         }
                     }
@@ -116,11 +110,19 @@ struct Sidebar: View {
     var body: some View {
         @Bindable var store = store
         List(selection: $store.sidebar) {
-            Section("Issues") {
-                ForEach(Filter.allCases) { f in
-                    Label(f.label, systemImage: f.symbol)
-                        .badge(store.count(f))
-                        .tag(SidebarItem.filter(f))
+            Section("Statuses") {
+                ForEach(store.statuses) { st in
+                    Button { store.toggleStatus(st.name) } label: {
+                        HStack {
+                            Label(st.label, systemImage: st.symbol)
+                            Spacer()
+                            Text("\(store.issues(for: store.sidebar).filter { $0.status == st.name }.count)").foregroundStyle(.secondary)
+                            Image(systemName: "checkmark").opacity(store.statusFilter.contains(st.name) ? 1 : 0)
+                        }
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .help("Show only issues whose status is “\(st.name)” (\(st.category)). Select several to combine.")
                 }
             }
             if !store.epics.isEmpty {
@@ -234,6 +236,7 @@ struct IssueRow: View {
                     Text(issue.id).font(.caption.monospaced()).foregroundStyle(.tertiary)
                     TypeBadge(type: issue.issueType)
                     if ready { Image(systemName: "bolt.fill").font(.caption).foregroundStyle(.green) }
+                    if store.isBlocked(issue) { Image(systemName: "lock.fill").font(.caption).foregroundStyle(.red).help("Blocked by an unfinished dependency") }
                     AssigneeLabel(issue: issue)
                     DueBadge(issue: issue)
                 }
@@ -244,5 +247,37 @@ struct IssueRow: View {
         }
         .padding(.vertical, 2)
         .contextMenu { AssigneeActions(issue: issue) }
+    }
+}
+
+
+/// Content with a right-hand panel whose width is stored by us, so it stays the same when the selection changes.
+struct SidePanelLayout<Content: View, Panel: View>: View {
+    let showPanel: Bool
+    @ViewBuilder var content: Content
+    @ViewBuilder var panel: Panel
+    @AppStorage("detailPanelWidth") private var storedWidth: Double = 420
+    @State private var dragStart: Double?
+
+    var body: some View {
+        HStack(spacing: 0) {
+            content.frame(minWidth: 360, maxWidth: .infinity, maxHeight: .infinity)
+            if showPanel {
+                Divider()
+                    .overlay(Color.clear.frame(width: 8).contentShape(Rectangle())
+                        .onHover { $0 ? NSCursor.resizeLeftRight.push() : NSCursor.pop() }
+                        .gesture(DragGesture(minimumDistance: 1, coordinateSpace: .global)
+                            .onChanged { g in
+                                let start = dragStart ?? storedWidth
+                                dragStart = start
+                                storedWidth = min(720, max(340, start - g.translation.width))
+                            }
+                            .onEnded { _ in dragStart = nil }))
+                panel
+                    .frame(width: min(720, max(340, storedWidth)))
+                    .frame(maxHeight: .infinity)
+                    .background(.background)
+            }
+        }
     }
 }

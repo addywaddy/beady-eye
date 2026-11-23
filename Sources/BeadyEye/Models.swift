@@ -57,10 +57,11 @@ struct Issue: Identifiable, Hashable, Decodable {
     var dueDate: Date? { dueAt?.beadsDate }
     var deferDate: Date? { deferUntil?.beadsDate }
 
-    /// Overdue means the due *day* is before today, so something due today isn't flagged until tomorrow.
+    /// Same as `bd list --overdue`: the due time has passed and the issue isn't closed. (A date-only due
+    /// date is local midnight, so something due today counts as overdue once today has begun.)
     var isOverdue: Bool {
         guard !isClosed, let d = dueDate else { return false }
-        return d < Calendar.current.startOfDay(for: .now)
+        return d < Date()
     }
     var isDueSoon: Bool {
         guard !isClosed, !isOverdue, let d = dueDate else { return false }
@@ -110,27 +111,53 @@ struct Comment: Identifiable, Hashable, Decodable {
     }
 }
 
-enum Status: String, CaseIterable, Identifiable {
-    case open, in_progress, blocked, deferred, closed
-    var id: String { rawValue }
-    var label: String {
-        switch self {
-        case .in_progress: "In Progress"
-        default: rawValue.capitalized
+/// A status as `bd statuses` defines it (built in or custom). Category is one of active, wip, done, frozen.
+struct StatusInfo: Identifiable, Hashable {
+    let name: String
+    let category: String
+    var id: String { name }
+
+    /// bd shows the raw name; this just makes "in_progress" readable.
+    var label: String { name.split(separator: "_").map { $0.capitalized }.joined(separator: " ") }
+
+    var symbol: String {
+        switch name {
+        case "open": "circle"
+        case "in_progress": "circle.lefthalf.filled"
+        case "blocked": "exclamationmark.circle"
+        case "deferred": "clock"
+        case "closed": "checkmark.circle.fill"
+        case "pinned": "pin"
+        case "hooked": "link"
+        default:
+            switch category {
+            case "wip": "circle.lefthalf.filled"
+            case "done": "checkmark.circle.fill"
+            case "frozen": "snowflake"
+            default: "circle"
+            }
         }
     }
-    var symbol: String {
-        switch self {
-        case .open: "circle"
-        case .in_progress: "circle.lefthalf.filled"
-        case .blocked: "exclamationmark.circle"
-        case .deferred: "clock"
-        case .closed: "checkmark.circle.fill"
-        }
+
+    /// Used only until (or if) `bd statuses` can't be read.
+    static let builtIn: [StatusInfo] = [
+        StatusInfo(name: "open", category: "active"), StatusInfo(name: "in_progress", category: "wip"),
+        StatusInfo(name: "blocked", category: "wip"), StatusInfo(name: "deferred", category: "frozen"),
+        StatusInfo(name: "closed", category: "done"), StatusInfo(name: "pinned", category: "frozen"),
+        StatusInfo(name: "hooked", category: "wip"),
+    ]
+
+    /// The statuses of the open project, so views that only have a status name (an icon, a history line)
+    /// can look up its category. Set by the store from `bd statuses`.
+    static var known: [StatusInfo] = builtIn
+
+    static func named(_ name: String) -> StatusInfo {
+        known.first { $0.name == name } ?? StatusInfo(name: name, category: "active")
     }
 }
 
-let issueTypes = ["task", "bug", "feature", "epic", "chore", "decision"]
+/// Only used until (or if) `bd types` can't be read.
+let fallbackIssueTypes = ["task", "bug", "feature", "chore", "epic", "decision", "spike", "story", "milestone"]
 
 extension String {
     /// "2026-11-23T13:15:53.61012Z" -> Date, tolerant of fractional seconds.

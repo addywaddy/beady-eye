@@ -5,6 +5,7 @@ import AppKit
 /// What the sidebar is pointing at: a status-style filter, an assignee, or an epic's children.
 enum SidebarItem: Hashable {
     case filter(Filter)
+    case status(String)   // a status beyond Open / In Progress / Closed, shown when something has it
     case assignee(String)
     case mine
     case unassigned
@@ -12,28 +13,40 @@ enum SidebarItem: Hashable {
 }
 
 enum Filter: String, CaseIterable, Identifiable {
-    case active, ready, inProgress, blocked, overdue, closed, all
+    case all, open, ready, inProgress, blocked, overdue, closed
     var id: String { rawValue }
     var label: String {
         switch self {
-        case .active: "Active"
+        case .all: "All"
+        case .open: "Open"
         case .ready: "Ready"
         case .inProgress: "In Progress"
         case .blocked: "Blocked"
         case .overdue: "Overdue"
         case .closed: "Closed"
-        case .all: "All"
+        }
+    }
+    /// What each entry means, in beads' terms.
+    var help: String {
+        switch self {
+        case .all: "Every issue"
+        case .open: "Status “open”"
+        case .ready: "Ready to work on (bd ready)"
+        case .inProgress: "Status “in_progress”"
+        case .blocked: "Waiting on unfinished dependencies (bd blocked)"
+        case .overdue: "Past their due date (bd list --overdue)"
+        case .closed: "Status “closed”"
         }
     }
     var symbol: String {
         switch self {
-        case .active: "tray"
+        case .all: "list.bullet"
+        case .open: "circle"
         case .ready: "bolt"
         case .inProgress: "circle.lefthalf.filled"
         case .blocked: "exclamationmark.circle"
         case .overdue: "calendar.badge.exclamationmark"
         case .closed: "checkmark.circle"
-        case .all: "list.bullet"
         }
     }
 }
@@ -72,7 +85,11 @@ final class Store {
     }
     var issues: [Issue] = []
     var readyIDs: Set<String> = []
-    var sidebar: SidebarItem = .filter(.active)
+    var blockedBy: [String: [String]] = [:]   // `bd blocked`: issue id -> the unfinished issues it waits on
+    var statuses: [StatusInfo] = StatusInfo.builtIn { didSet { StatusInfo.known = statuses } }
+    var types: [String] = fallbackIssueTypes
+    var sidebar: SidebarItem = .filter(.all)
+    var statusFilter: Set<String> = []   // sidebar status toggles; empty means every status
     var me: String?             // the name bd uses for "you"; claims are recorded under it
     var meEmail: String?        // git user.email, which bd stores as an issue's `owner`
     var showNewIssue = false
@@ -149,8 +166,9 @@ final class Store {
 
     private func activeChanged() {
         poller?.cancel()
-        issues = []; readyIDs = []; detail = nil; selection = nil; error = nil; refreshError = nil
-        sidebar = .filter(.active)
+        issues = []; readyIDs = []; blockedBy = [:]; detail = nil; selection = nil; error = nil; refreshError = nil
+        sidebar = .filter(.all)
+        statusFilter = []
         me = nil; meEmail = nil
         guard let ws = workspace else { client = nil; return }
         let c = BdClient(workspace: ws)
@@ -158,6 +176,13 @@ final class Store {
         Task { [weak self] in
             let who = await c.currentIdentity()
             if let self, self.client === c { self.me = who.name; self.meEmail = who.email }
+        }
+        // Statuses and types are the project's own (bd may have custom ones), so ask bd.
+        Task { [weak self] in
+            let st = try? await c.statuses(), ty = try? await c.issueTypes()
+            guard let self, self.client === c else { return }
+            if let st, !st.isEmpty { self.statuses = st }
+            if let ty, !ty.isEmpty { self.types = ty }
         }
         poller = Task { [weak self] in
             while !Task.isCancelled {
@@ -171,10 +196,10 @@ final class Store {
 
     func issues(for f: Filter) -> [Issue] {
         switch f {
-        case .active: issues.filter { !$0.isClosed }
+        case .open: issues.filter { $0.status == "open" }   // exactly the board's Open column
         case .ready: issues.filter { readyIDs.contains($0.id) }
         case .inProgress: issues.filter { $0.status == "in_progress" }
-        case .blocked: issues.filter { $0.status == "blocked" || ($0.status == "open" && !readyIDs.contains($0.id)) }
+        case .blocked: issues.filter(isBlocked)   // `bd blocked`: waiting on dependencies, any status
         case .overdue: issues.filter(\.isOverdue)
         case .closed: issues.filter(\.isClosed)
         case .all: issues
@@ -186,11 +211,15 @@ final class Store {
         return q.isEmpty || i.title.lowercased().contains(q) || i.id.lowercased().contains(q) || (i.description ?? "").lowercased().contains(q)
     }
 
-    private func byPriority(_ a: Issue, _ b: Issue) -> Bool { (a.priority, a.createdAt ?? "") < (b.priority, b.createdAt ?? "") }
+    /// Open work by priority first; finished work sinks to the bottom of mixed lists such as "All".
+    private func byPriority(_ a: Issue, _ b: Issue) -> Bool {
+        (a.isClosed ? 1 : 0, a.priority, a.createdAt ?? "") < (b.isClosed ? 1 : 0, b.priority, b.createdAt ?? "")
+    }
 
     func issues(for item: SidebarItem) -> [Issue] {
         switch item {
         case .filter(let f): issues(for: f)
+        case .status(let name): issues.filter { $0.status == name }
         case .assignee(let a): issues.filter { $0.assignee == a && !$0.isClosed }
         case .mine: issues.filter { isMine($0) && !$0.isClosed }
         case .unassigned: issues.filter { ($0.assignee ?? "").isEmpty && !$0.isClosed }
@@ -198,17 +227,42 @@ final class Store {
         }
     }
 
-    var visible: [Issue] { issues(for: sidebar).filter(matchesSearch).sorted(by: byPriority) }
+    var visible: [Issue] { issues(for: sidebar).filter(matchesStatusFilter).filter(matchesSearch).sorted(by: byPriority) }
 
-    /// What the board and graph show: the sidebar selection applies to them too. "Active" is the
-    /// default, so on a board it means the whole board (closed work stays visible in its column).
-    var scoped: [Issue] {
-        if case .filter(.active) = sidebar { return issues }
-        return issues(for: sidebar)
+    func matchesStatusFilter(_ i: Issue) -> Bool { statusFilter.isEmpty || statusFilter.contains(i.status) }
+
+    /// What the board and graph show: the same selection as the list, so "Open" fills only the Open
+    /// column and "All" (the default) fills every column.
+    var scoped: [Issue] { issues(for: sidebar) }
+
+    /// bd's status categories, in board order. These are the board's columns.
+    static let categories = ["active", "wip", "done", "frozen"]
+
+    func category(of status: String) -> String { statuses.first { $0.name == status }?.category ?? StatusInfo.named(status).category }
+
+    /// Issues in one board column (a bd category), honouring the sidebar scope, status toggles and search box.
+    func column(category cat: String) -> [Issue] {
+        scoped.filter { category(of: $0.status) == cat && matchesStatusFilter($0) && matchesSearch($0) }.sorted(by: byPriority)
     }
 
-    /// Issues in one board column, honouring the sidebar scope and the search box.
-    func column(_ status: String) -> [Issue] { scoped.filter { $0.status == status && matchesSearch($0) }.sorted(by: byPriority) }
+    func toggleStatus(_ name: String) {
+        if statusFilter.contains(name) { statusFilter.remove(name) } else { statusFilter.insert(name) }
+    }
+
+    /// Dropping a card on a category column: pick the status to use. A single toggled status in that category wins,
+    /// otherwise bd's own default for the category.
+    func status(forDropIn cat: String) -> String? {
+        let inCat = statuses.filter { $0.category == cat }.map(\.name)
+        if let picked = inCat.first(where: statusFilter.contains) { return picked }
+        let preferred = ["active": "open", "wip": "in_progress", "done": "closed", "frozen": "deferred"][cat]
+        if let p = preferred, inCat.contains(p) { return p }
+        return inCat.first
+    }
+
+    func move(_ id: String, toCategory cat: String) {
+        guard let issue = issue(id), category(of: issue.status) != cat, let status = status(forDropIn: cat) else { return }
+        move(id, to: status)
+    }
 
     // MARK: Epics and people
 
@@ -233,6 +287,29 @@ final class Store {
         return (entries, events)
     }
 
+    /// Waiting on an unfinished dependency, per `bd blocked`. This is separate from the `blocked` *status*:
+    /// an issue can be in progress and still blocked.
+    func isBlocked(_ i: Issue) -> Bool { !(blockedBy[i.id] ?? []).isEmpty }
+
+    /// The statuses every board shows, whether or not anything is in them.
+    private static let coreStatuses: Set<String> = ["open", "in_progress", "closed"]
+
+    /// Board columns, in bd's status order: the core workflow always, any other status only when an issue
+    /// has it (so pinned, hooked, deferred and custom statuses show up without cluttering an empty board).
+    var columnStatuses: [StatusInfo] {
+        let present = Set(issues.map(\.status))
+        var cols = statuses
+        // A status bd no longer lists (a removed custom status) must still not hide its issues.
+        for name in present.subtracting(cols.map(\.name)).sorted() { cols.append(StatusInfo.named(name)) }
+        return cols
+    }
+
+    /// Statuses that get their own sidebar row: those beyond the three core ones that have issues.
+    var extraStatuses: [StatusInfo] {
+        let present = Set(issues.map(\.status))
+        return columnStatuses.filter { !Self.coreStatuses.contains($0.name) && present.contains($0.name) }
+    }
+
     func presentNewIssue(parent: String? = nil) { newIssueParent = parent; showNewIssue = true }
 
     func count(_ f: Filter) -> Int { issues(for: f).count }
@@ -244,10 +321,12 @@ final class Store {
         do {
             async let all = client.listAll()
             async let ready = client.readyIDs()
-            let (a, r) = try await (all, ready)
+            async let blocked = client.blocked()
+            let (a, r, b) = try await (all, ready, blocked)
             guard self.client === client else { return }   // connection changed while we were waiting
             if a != issues { issues = a }
             readyIDs = r
+            if b != blockedBy { blockedBy = b }
             refreshError = nil
             if selection != nil { await reloadDetail() }
         } catch {
@@ -292,7 +371,8 @@ final class Store {
                 let id = try await client.create(title: title, type: type, priority: priority, description: description,
                                                  assignee: assignee, due: dueString, parent: parent)
                 await refresh()
-                sidebar = .filter(.active)
+                // Make sure the new issue is visible: switch to All if the current view would hide it.
+                if !issues(for: sidebar).contains(where: { $0.id == id }) { sidebar = .filter(.all) }
                 selection = id
             } catch { self.error = error.localizedDescription }
         }

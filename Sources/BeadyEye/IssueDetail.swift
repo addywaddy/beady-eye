@@ -19,6 +19,7 @@ struct IssueDetail: View {
             VStack(alignment: .leading, spacing: 22) {
                 header
                 if issue.isClosed { closedNote }
+                if store.isBlocked(issue) { blockedNote }
                 properties
                 descriptionSection
                 if issue.isEpic { children }
@@ -89,6 +90,26 @@ struct IssueDetail: View {
         .background(.green.opacity(0.1), in: RoundedRectangle(cornerRadius: 10))
     }
 
+    /// Mirrors `bd blocked`: the unfinished issues this one is waiting on.
+    @ViewBuilder private var blockedNote: some View {
+        let ids = store.blockedBy[issue.id] ?? []
+        VStack(alignment: .leading, spacing: 6) {
+            Label("Blocked by", systemImage: "lock.fill").font(.callout.weight(.medium)).foregroundStyle(.red)
+            ForEach(ids, id: \.self) { id in
+                Button { store.selection = id } label: {
+                    HStack(spacing: 8) {
+                        if let b = store.issue(id) { StatusIcon(status: b.status) }
+                        Text(store.issue(id)?.title ?? id).lineLimit(2)
+                        Spacer(minLength: 6)
+                        Text(id).font(.caption.monospaced()).foregroundStyle(.tertiary)
+                    }.contentShape(Rectangle())
+                }.buttonStyle(.plain)
+            }
+        }
+        .padding(12).frame(maxWidth: .infinity, alignment: .leading)
+        .background(.red.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
+    }
+
     // MARK: Properties
 
     private var properties: some View {
@@ -96,7 +117,10 @@ struct IssueDetail: View {
             Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 14, verticalSpacing: 12) {
                 propertyRow("Status") {
                     Picker("Status", selection: Binding(get: { issue.status }, set: { store.setStatus(issue.id, $0) })) {
-                        ForEach(Status.allCases) { Label($0.label, systemImage: $0.symbol).tag($0.rawValue) }
+                        // bd's own statuses; keep the current one selectable even if bd no longer lists it.
+                        ForEach(store.statuses.contains { $0.name == issue.status } ? store.statuses : store.statuses + [StatusInfo.named(issue.status)]) {
+                            Label($0.label, systemImage: $0.symbol).tag($0.name)
+                        }
                     }.labelsHidden().fixedSize()
                 }
                 propertyRow("Priority") {
@@ -415,7 +439,7 @@ struct NewIssueSheet: View {
             Text("New Issue").font(.headline)
             TextField("Title", text: $title).textFieldStyle(.roundedBorder)
             HStack {
-                Picker("Type", selection: $type) { ForEach(issueTypes, id: \.self) { Text($0.capitalized).tag($0) } }
+                Picker("Type", selection: $type) { ForEach(store.types, id: \.self) { Text($0.capitalized).tag($0) } }
                 Picker("Priority", selection: $priority) { ForEach(0...4, id: \.self) { Text("P\($0)").tag($0) } }
             }
             HStack {

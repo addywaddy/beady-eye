@@ -3,34 +3,33 @@ import SwiftUI
 struct BoardView: View {
     @Environment(Store.self) private var store
 
-    /// Deferred is only worth a column when something is deferred.
-    private var columns: [Status] {
-        Status.allCases.filter { $0 != .deferred || !store.column($0.rawValue).isEmpty }
-    }
 
     var body: some View {
-        ScrollView(.horizontal) {
-            HStack(alignment: .top, spacing: 12) {
-                ForEach(columns) { BoardColumn(status: $0) }
+        GeometryReader { geo in
+            ScrollView(.horizontal) {
+                HStack(alignment: .top, spacing: 12) {
+                    ForEach(Store.categories, id: \.self) { BoardColumn(category: $0) }
+                }
+                .padding(16)
+                .frame(minWidth: geo.size.width)   // columns share the full width, and scroll only when too narrow
             }
-            .padding(16)
         }
         .background(.background.secondary)
         .safeAreaInset(edge: .top, spacing: 0) { RefreshBanner() }
     }
 }
 
-private struct BoardColumn: View {
+struct BoardColumn: View {
     @Environment(Store.self) private var store
-    let status: Status
+    let category: String
     @State private var targeted = false
 
     var body: some View {
-        let items = store.column(status.rawValue)
+        let items = store.column(category: category)
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                StatusIcon(status: status.rawValue)
-                Text(status.label).font(.headline)
+                Image(systemName: Self.symbol(category)).foregroundStyle(.secondary)
+                Text(Self.title(category)).font(.headline)
                 Text("\(items.count)").font(.subheadline.monospacedDigit()).foregroundStyle(.secondary)
                 Spacer()
             }
@@ -44,16 +43,21 @@ private struct BoardColumn: View {
             .scrollIndicators(.hidden)
         }
         .padding(10)
-        .frame(width: 270)
+        .frame(minWidth: 240, maxWidth: .infinity)
         .frame(maxHeight: .infinity, alignment: .top)
         .background(targeted ? AnyShapeStyle(.tint.opacity(0.15)) : AnyShapeStyle(.background),
                     in: RoundedRectangle(cornerRadius: 10))
         .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(targeted ? AnyShapeStyle(.tint) : AnyShapeStyle(.separator)))
         .dropDestination(for: String.self) { ids, _ in
-            ids.forEach { store.move($0, to: status.rawValue) }
+            ids.forEach { store.move($0, toCategory: category) }
             return !ids.isEmpty
         } isTargeted: { targeted = $0 }
     }
+}
+
+extension BoardColumn {
+    static func title(_ c: String) -> String { ["active": "Active", "wip": "In Progress", "done": "Done", "frozen": "Frozen"][c] ?? c.capitalized }
+    static func symbol(_ c: String) -> String { ["active": "circle", "wip": "circle.lefthalf.filled", "done": "checkmark.circle.fill", "frozen": "snowflake"][c] ?? "circle" }
 }
 
 private struct BoardCard: View {
@@ -61,8 +65,8 @@ private struct BoardCard: View {
     let issue: Issue
     let ready: Bool
 
-    /// Open but not ready means something it depends on is still unfinished.
-    private var waiting: Bool { issue.status == "open" && !ready }
+    /// `bd blocked`: waiting on an unfinished dependency. Independent of status, so an in-progress card can be blocked.
+    private var blockers: [String] { store.blockedBy[issue.id] ?? [] }
 
     var body: some View {
         let selected = store.selection == issue.id
@@ -71,10 +75,14 @@ private struct BoardCard: View {
                 .strikethrough(issue.isClosed).foregroundStyle(issue.isClosed ? .secondary : .primary)
             HStack(spacing: 8) {
                 PriorityBadge(priority: issue.priority)
+                StatusChip(status: issue.status)
                 TypeBadge(type: issue.issueType)
                 Spacer(minLength: 0)
                 if ready { Image(systemName: "bolt.fill").foregroundStyle(.green).help("Ready to work on") }
-                if waiting { Image(systemName: "lock.fill").foregroundStyle(.orange).help("Waiting on a dependency") }
+                if !blockers.isEmpty {
+                    Image(systemName: "lock.fill").foregroundStyle(.red)
+                        .help("Blocked by " + blockers.map { store.issue($0)?.title ?? $0 }.joined(separator: ", "))
+                }
             }
             if issue.isEpic { let p = store.progress(of: issue.id); EpicProgress(done: p.done, total: p.total) }
             if let pid = issue.parent, let parent = store.issue(pid), store.sidebar != .epic(pid) {

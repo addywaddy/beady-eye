@@ -32,6 +32,9 @@ struct TypeBadge: View {
         case "epic": "square.stack.3d.up"
         case "chore": "wrench"
         case "decision": "scale.3d"
+        case "spike": "bolt.horizontal"
+        case "story": "book"
+        case "milestone": "flag"
         default: "checklist"
         }
     }
@@ -41,9 +44,15 @@ struct TypeBadge: View {
 struct StatusIcon: View {
     let status: String
     var body: some View {
-        let s = Status(rawValue: status)
-        Image(systemName: s?.symbol ?? "circle")
-            .foregroundStyle(status == "closed" ? .green : status == "in_progress" ? .blue : status == "blocked" ? .red : .secondary)
+        let info = StatusInfo.named(status)
+        let color: Color = switch (status, info.category) {
+        case ("blocked", _): .red
+        case (_, "done"): .green
+        case (_, "wip"): .blue
+        case (_, "frozen"): .gray
+        default: .secondary
+        }
+        Image(systemName: info.symbol).foregroundStyle(color)
     }
 }
 
@@ -130,5 +139,16 @@ struct FlowLayout: Layout {
             x += size.width + spacing
             rowHeight = max(rowHeight, size.height)
         }
+    }
+}
+
+/// The issue's exact bd status, shown on board cards because columns are categories.
+struct StatusChip: View {
+    let status: String
+    var body: some View {
+        let info = StatusInfo.named(status)
+        Label(info.label, systemImage: info.symbol)
+            .font(.caption).labelStyle(.titleAndIcon).foregroundStyle(.secondary)
+            .help("Status: \(status) (\(info.category))")
     }
 }

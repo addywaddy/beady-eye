@@ -58,8 +58,8 @@ struct HistoryRow: Identifiable {
         if isCreation { return "Created" }
         for c in changes where c.label == "Status" {
             if case .short(let old, let new) = c.value {
-                if new == Status.closed.label { return "Closed" }
-                if old == Status.closed.label { return "Reopened" }
+                if new == StatusInfo.named("closed").label { return "Closed" }
+                if old == StatusInfo.named("closed").label { return "Reopened" }
             }
         }
         return "Changed " + changes.map(\.label).joined(separator: ", ")
@@ -70,7 +70,7 @@ private func dayString(_ s: String?) -> String? {
     s?.beadsDate.map { $0.formatted(.dateTime.year().month(.abbreviated).day()) } ?? s
 }
 
-private func statusLabel(_ raw: String) -> String { Status(rawValue: raw)?.label ?? raw }
+private func statusLabel(_ raw: String) -> String { StatusInfo.named(raw).label }
 
 /// What changed between two snapshots of the same issue. Short fields become "old → new"; long text
 /// fields become a line diff. An unchanged field produces nothing.

@@ -123,6 +123,41 @@ actor BdClient {
         try await decode([Issue].self, ["list", "--all", "-n", "0", "--flat"])
     }
 
+    /// `bd statuses`: built-in statuses plus any custom ones the project configured, in bd's order.
+    func statuses() async throws -> [StatusInfo] {
+        let data = try await run(["statuses", "--json"])
+        guard let root = try JSONSerialization.jsonObject(with: data) as? [String: Any] else { return [] }
+        var out: [StatusInfo] = []
+        for key in root.keys.sorted(by: { $0 == "built_in_statuses" ? true : ($1 == "built_in_statuses" ? false : $0 < $1) }) {
+            for item in root[key] as? [[String: Any]] ?? [] {
+                if let name = item["name"] as? String { out.append(StatusInfo(name: name, category: item["category"] as? String ?? "active")) }
+            }
+        }
+        return out
+    }
+
+    /// `bd types`: the project's issue types (core plus custom), without bd's internal system types.
+    func issueTypes() async throws -> [String] {
+        let data = try await run(["types", "--json"])
+        guard let root = try JSONSerialization.jsonObject(with: data) as? [String: Any] else { return [] }
+        var out: [String] = []
+        for key in root.keys.sorted(by: { $0 == "core_types" ? true : ($1 == "core_types" ? false : $0 < $1) }) where key != "system_types" {
+            for item in root[key] as? [[String: Any]] ?? [] { if let name = item["name"] as? String { out.append(name) } }
+        }
+        return out
+    }
+
+    /// `bd blocked`: issues waiting on unfinished dependencies (whatever their status), with their blockers.
+    func blocked() async throws -> [String: [String]] {
+        struct Row: Decodable {
+            let id: String
+            let blockedBy: [String]?
+            enum CodingKeys: String, CodingKey { case id, blockedBy = "blocked_by" }
+        }
+        let rows = try await decode([Row].self, ["blocked"])
+        return Dictionary(rows.map { ($0.id, $0.blockedBy ?? []) }, uniquingKeysWith: { a, _ in a })
+    }
+
     func readyIDs() async throws -> Set<String> {
         Set(try await decode([Issue].self, ["ready", "-n", "0"]).map(\.id))
     }
