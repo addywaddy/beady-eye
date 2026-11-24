@@ -321,6 +321,7 @@ struct SidePanelLayout<Content: View, Panel: View>: View {
             content.frame(minWidth: 360, maxWidth: .infinity, maxHeight: .infinity)
             if showPanel {
                 Divider()
+                    .padding(.top, 16)   // same inset as the board's columns
                     .overlay(Color.clear.frame(width: 8).contentShape(Rectangle())
                         .onHover { $0 ? NSCursor.resizeLeftRight.push() : NSCursor.pop() }
                         .gesture(DragGesture(minimumDistance: 1, coordinateSpace: .global)
@@ -345,8 +346,14 @@ struct SidePanelLayout<Content: View, Panel: View>: View {
                 }
                     .frame(width: min(720, max(340, storedWidth)))
                     .frame(maxHeight: .infinity)
-                    .background(.background)
+                    .background(.background, ignoresSafeAreaEdges: [])   // stay below the toolbar
+                    .overlay(alignment: .top) { Rectangle().fill(.separator).frame(height: 1) }   // top border, like the columns'
+                    .padding(.top, 16)   // top edge lines up with the board's columns
             }
         }
+        // Same surface the board and graph use, running up under the toolbar, so the toolbar band is one colour
+        // across the content and the panel.
+        // A view, not a style: `.background(style)` would also change what `.background` means for the content.
+        .background { Rectangle().fill(.background.secondary).ignoresSafeArea() }
     }
 }
