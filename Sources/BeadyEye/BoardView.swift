@@ -14,7 +14,7 @@ struct BoardView: View {
                 .frame(minWidth: geo.size.width)   // columns share the full width, and scroll only when too narrow
             }
         }
-        .background(.background.secondary)
+        .background(.background.secondary, ignoresSafeAreaEdges: .all)
         .safeAreaInset(edge: .top, spacing: 0) { RefreshBanner() }
     }
 }

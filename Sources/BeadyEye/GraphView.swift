@@ -115,7 +115,7 @@ struct GraphView: View {
                     }
                     .frame(width: g.size.width, height: g.size.height)
                 }
-                .background(.background.secondary)
+                .background(.background.secondary, ignoresSafeAreaEdges: .all)
             }
         }
     }

@@ -24,7 +24,7 @@ struct ContentView: View {
                         } detail: {
                             // A plain resizable side panel, the same kind of container the list view's detail
                             // column is, rather than SwiftUI's .inspector.
-                            SidePanelLayout(showPanel: store.selection != nil) {
+                            SidePanelLayout(showPanel: store.selection != nil, onClose: { store.selection = nil }) {
                                 if store.viewMode == .board { BoardView() } else { GraphView() }
                             } panel: {
                                 detailPane
@@ -34,6 +34,8 @@ struct ContentView: View {
                 }
                 .navigationTitle(store.active?.name ?? "Beady Eye")
                 .searchable(text: $store.search, prompt: "Search issues")
+                // Board and graph draw their own surface; a separate toolbar background shows as a seam at the sidebar edge.
+                .toolbarBackground(store.viewMode == .list ? Visibility.automatic : Visibility.hidden, for: .windowToolbar)
                 .toolbar {
                     ToolbarItem(placement: .principal) {
                         Picker("View", selection: $store.viewMode) {
@@ -308,6 +310,7 @@ struct IssueRow: View {
 /// Content with a right-hand panel whose width is stored by us, so it stays the same when the selection changes.
 struct SidePanelLayout<Content: View, Panel: View>: View {
     let showPanel: Bool
+    var onClose: () -> Void = {}
     @ViewBuilder var content: Content
     @ViewBuilder var panel: Panel
     @AppStorage("detailPanelWidth") private var storedWidth: Double = 420
@@ -327,7 +330,19 @@ struct SidePanelLayout<Content: View, Panel: View>: View {
                                 storedWidth = min(720, max(340, start - g.translation.width))
                             }
                             .onEnded { _ in dragStart = nil }))
-                panel
+                VStack(spacing: 0) {
+                    HStack {
+                        Spacer()
+                        Button(action: onClose) {
+                            Image(systemName: "xmark").imageScale(.small).frame(width: 22, height: 22).contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain).foregroundStyle(.secondary)
+                        .keyboardShortcut(.cancelAction)
+                        .help("Close panel (Esc)")
+                    }
+                    .padding(.horizontal, 10).padding(.top, 6)
+                    panel
+                }
                     .frame(width: min(720, max(340, storedWidth)))
                     .frame(maxHeight: .infinity)
                     .background(.background)
