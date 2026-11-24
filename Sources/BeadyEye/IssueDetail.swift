@@ -169,9 +169,12 @@ struct IssueDetail: View {
             if name.isEmpty {
                 Text("Unassigned").foregroundStyle(.secondary)
                 if !issue.isClosed {
-                    Button { store.claim(issue.id) } label: { Label("Claim", systemImage: "hand.raised") }
-                        .controlSize(.small)
-                        .help("Assign to \(store.me ?? "you") and start work")
+                    let open = issue.status == "open"
+                    Button { store.claim(issue.id) } label: {
+                        Label(open ? "Claim and Start" : "Assign to Me", systemImage: open ? "hand.raised" : "person.crop.circle")
+                    }
+                    .controlSize(.small)
+                    .help(open ? "Assign to \(store.me ?? "you") and move to In Progress" : "Assign to \(store.me ?? "you")")
                 }
             } else {
                 VStack(alignment: .leading, spacing: 1) {

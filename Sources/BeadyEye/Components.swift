@@ -115,7 +115,11 @@ struct AssigneeActions: View {
     var body: some View {
         let unassigned = (issue.assignee ?? "").isEmpty
         if !issue.isClosed {
-            if unassigned { Button("Claim", systemImage: "hand.raised") { store.claim(issue.id) } }
+            // Claiming (assign + start, atomically) only works on an open issue; on any other status it would
+            // be the same as assigning, so there is just one item.
+            if unassigned && issue.status == "open" {
+                Button("Claim and Start", systemImage: "hand.raised") { store.claim(issue.id) }
+            }
             if let me = store.me, issue.assignee != me {
                 Button("Assign to Me", systemImage: "person.crop.circle") { store.setAssignee(issue.id, me) }
             }
