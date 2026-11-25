@@ -12,7 +12,7 @@ struct ContentView: View {
                 Group {
                     if store.viewMode == .list {
                         NavigationSplitView {
-                            Sidebar().navigationSplitViewColumnWidth(min: 160, ideal: 180, max: 240)
+                            Sidebar().safeAreaInset(edge: .bottom, spacing: 0) { DoltBar() }.navigationSplitViewColumnWidth(min: 160, ideal: 180, max: 240)
                         } content: {
                             IssueList().navigationSplitViewColumnWidth(min: 300, ideal: 380)
                         } detail: {
@@ -20,7 +20,7 @@ struct ContentView: View {
                         }
                     } else {
                         NavigationSplitView {
-                            Sidebar().navigationSplitViewColumnWidth(min: 160, ideal: 180, max: 240)
+                            Sidebar().safeAreaInset(edge: .bottom, spacing: 0) { DoltBar() }.navigationSplitViewColumnWidth(min: 160, ideal: 180, max: 240)
                         } detail: {
                             // A plain resizable side panel, the same kind of container the list view's detail
                             // column is, rather than SwiftUI's .inspector.
@@ -126,7 +126,7 @@ struct Sidebar: View {
                         HStack {
                             Label(st.label, systemImage: st.symbol)
                             Spacer()
-                            Text("\(store.issues(for: store.sidebar).filter { $0.status == st.name }.count)").foregroundStyle(.secondary)
+                            Text("\(store.count(status: st.name))").foregroundStyle(.secondary)
                             Image(systemName: "checkmark").opacity(store.statusFilter.contains(st.name) ? 1 : 0)
                         }
                         .contentShape(Rectangle())
@@ -135,13 +135,14 @@ struct Sidebar: View {
                     .help("Show only issues whose status is “\(st.name)” (\(st.category)). Select several to combine.")
                 }
             }
-            if !store.epics.isEmpty {
+            if !store.allEpics.isEmpty {
                 Section("Epics") {
-                    ForEach(store.epics) { e in
+                    ForEach(store.allEpics) { e in
                         let p = store.progress(of: e.id)
                         Button { store.toggleEpic(e.id) } label: {
                             HStack {
-                                Label(e.title, systemImage: "square.stack.3d.up").lineLimit(1)
+                                Label(e.title, systemImage: e.isClosed ? "checkmark.circle" : "square.stack.3d.up").lineLimit(1)
+                                    .foregroundStyle(e.isClosed ? .secondary : .primary)
                                 Spacer()
                                 if p.total > 0 { Text("\(p.done)/\(p.total)").foregroundStyle(.secondary) }
                                 Image(systemName: "checkmark").opacity(store.epicFilter.contains(e.id) ? 1 : 0)
@@ -286,6 +287,7 @@ struct IssueRow: View {
                 HStack(spacing: 8) {
                     Text(issue.id).font(.caption.monospaced()).foregroundStyle(.tertiary)
                     TypeBadge(type: issue.issueType)
+                    EpicChip(issue: issue)
                     if ready { Image(systemName: "bolt.fill").font(.caption).foregroundStyle(.green) }
                     if store.isBlocked(issue) { Image(systemName: "lock.fill").font(.caption).foregroundStyle(.red).help("Blocked by an unfinished dependency") }
                     AssigneeLabel(issue: issue)

@@ -184,3 +184,20 @@ struct StatusChip: View {
             .help("Status: \(status) (\(info.category))")
     }
 }
+
+/// The id of the epic an issue belongs to, shown only when the parent is an epic. The tooltip has the epic's title.
+struct EpicChip: View {
+    @Environment(Store.self) private var store
+    let issue: Issue
+    var body: some View {
+        if let pid = issue.parent, let epic = store.issue(pid), epic.isEpic {
+            Label(pid, systemImage: "square.stack.3d.up")
+                .font(.caption.monospaced())
+                .padding(.horizontal, 5).padding(.vertical, 1)
+                .background(Color.purple.opacity(0.15), in: Capsule())
+                .foregroundStyle(.purple)
+                .lineLimit(1)
+                .help("Epic: \(epic.title)")
+        }
+    }
+}

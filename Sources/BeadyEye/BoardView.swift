@@ -85,9 +85,7 @@ private struct BoardCard: View {
                 }
             }
             if issue.isEpic { let p = store.progress(of: issue.id); EpicProgress(done: p.done, total: p.total) }
-            if let pid = issue.parent, let parent = store.issue(pid), !store.epicFilter.contains(pid) {
-                Label(parent.title, systemImage: "square.stack.3d.up").font(.caption).lineLimit(1).foregroundStyle(.secondary)
-            }
+            EpicChip(issue: issue)
             HStack {
                 DueBadge(issue: issue)
                 DeferBadge(issue: issue)

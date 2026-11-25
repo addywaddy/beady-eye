@@ -115,6 +115,7 @@ final class Store {
 
     private var client: BdClient?
     private var poller: Task<Void, Never>?
+    private var pollCount = 0
 
     var active: Connection? { connections.first { $0.id == activeID } }
     var workspace: URL? { active?.url }
@@ -183,6 +184,7 @@ final class Store {
         epicFilter = []
         assigneeFilter = []
         me = nil; meEmail = nil
+        dolt = nil; remotes = []; doltBusy = nil; doltError = nil
         guard let ws = workspace else { client = nil; return }
         let c = BdClient(workspace: ws)
         client = c
@@ -243,10 +245,18 @@ final class Store {
     var visible: [Issue] { issues(for: sidebar).filter(matchesStatusFilter).filter(matchesSearch).sorted(by: byPriority) }
 
     func matchesStatusFilter(_ i: Issue) -> Bool {
-        (statusFilter.isEmpty || statusFilter.contains(i.status))
-            && (assigneeFilter.isEmpty || assigneeFilter.contains(i.assignee ?? ""))
-            && (epicFilter.isEmpty || epicFilter.contains(i.parent ?? ""))
+        (statusFilter.isEmpty || statusFilter.contains(i.status)) && matchesOtherFilters(i)
+    }
+
+    /// Every sidebar filter except status, so each status row can show how many issues it would add.
+    private func matchesOtherFilters(_ i: Issue) -> Bool {
+        (assigneeFilter.isEmpty || assigneeFilter.contains(i.assignee ?? ""))
+            && (epicFilter.isEmpty || epicFilter.contains(i.parent ?? "") || epicFilter.contains(i.id))
             && (labelFilter.isEmpty || !labelFilter.isDisjoint(with: i.labels ?? []))
+    }
+
+    func count(status: String) -> Int {
+        issues(for: sidebar).filter { $0.status == status && matchesOtherFilters($0) && matchesSearch($0) }.count
     }
 
     var labels: [String] { Set(issues.flatMap { $0.labels ?? [] }).sorted() }
@@ -300,6 +310,8 @@ final class Store {
 
     // MARK: Epics and people
 
+    /// Every epic, closed ones too, for the sidebar filter. Pickers use `epics` (open only).
+    var allEpics: [Issue] { issues.filter(\.isEpic).sorted { ($0.isClosed ? 1 : 0, $0.priority) < ($1.isClosed ? 1 : 0, $1.priority) } }
     var epics: [Issue] { issues.filter { $0.isEpic && !$0.isClosed }.sorted(by: byPriority) }
     func children(of id: String) -> [Issue] { issues.filter { $0.parent == id }.sorted(by: byPriority) }
     func progress(of id: String) -> (done: Int, total: Int) {
@@ -367,6 +379,45 @@ final class Store {
         }
     }
 
+    // MARK: Dolt version control
+
+    var dolt: DoltStatus?
+    var remotes: [DoltRemote] = []
+    var doltBusy: String?        // what is running, e.g. "Pushing…"
+    var doltError: String?
+
+    func loadDolt() async {
+        guard let client else { return }
+        async let st = try? client.vcStatus()
+        async let rs = try? client.remotes()
+        let (s, r) = await (st, rs)
+        guard self.client === client else { return }
+        if s != dolt { dolt = s }
+        if let r, r != remotes { remotes = r }
+    }
+
+    private func doltAction(_ busy: String, _ work: @escaping (BdClient) async throws -> Void) {
+        guard let client, doltBusy == nil else { return }
+        doltBusy = busy; doltError = nil
+        Task {
+            do { try await work(client) } catch { doltError = error.localizedDescription }
+            doltBusy = nil
+            await loadDolt(); await refresh()
+        }
+    }
+    func doltPush() { doltAction("Pushing…") { try await $0.doltPush() } }
+    func doltPull() { doltAction("Pulling…") { try await $0.doltPull() } }
+    func doltCommit() { doltAction("Committing…") { try await $0.doltCommit() } }
+    func removeRemote(_ name: String) { doltAction("Removing…") { try await $0.removeRemote(name) } }
+    /// Returns bd's error text (nil on success) so the sheet can show it.
+    func addRemote(_ name: String, _ url: String, allowGitOrigin: Bool) async -> String? {
+        guard let client else { return "No project open" }
+        do { try await client.addRemote(name, url, allowGitOrigin: allowGitOrigin) }
+        catch { return error.localizedDescription }
+        await loadDolt()
+        return nil
+    }
+
     func presentNewIssue(parent: String? = nil) { newIssueParent = parent; showNewIssue = true }
 
     func count(_ f: Filter) -> Int { issues(for: f).count }
@@ -385,6 +436,8 @@ final class Store {
             readyIDs = r
             if b != blockedBy { blockedBy = b }
             refreshError = nil
+            pollCount += 1
+            if dolt == nil || pollCount % 5 == 0 { await loadDolt() }
             if selection != nil { await reloadDetail() }
         } catch {
             if self.client === client { refreshError = error.localizedDescription }

@@ -117,6 +117,33 @@ actor BdClient {
         }
     }
 
+    // MARK: Dolt version control
+
+    func vcStatus() async throws -> DoltStatus {
+        let data = try await run(["vc", "status", "--json"])
+        guard let o = try JSONSerialization.jsonObject(with: data) as? [String: Any] else { return DoltStatus(branch: "", commit: "", uncommitted: 0) }
+        // bd only reports changes when there are some; tolerate whichever shape it uses.
+        var n = 0
+        for (k, v) in o where ["change", "uncommitted", "modified", "dirty"].contains(where: { k.lowercased().contains($0) }) {
+            if let a = v as? [Any] { n += a.count } else if let i = v as? Int { n += i } else if let d = v as? [String: Any] { n += d.count }
+        }
+        return DoltStatus(branch: o["branch"] as? String ?? "", commit: o["commit"] as? String ?? "", uncommitted: n)
+    }
+
+    func remotes() async throws -> [DoltRemote] {
+        let data = try await run(["dolt", "remote", "list", "--json"])
+        guard let a = try JSONSerialization.jsonObject(with: data) as? [[String: Any]] else { return [] }
+        return a.compactMap { d in (d["name"] as? String).map { DoltRemote(name: $0, url: d["url"] as? String ?? "") } }
+    }
+
+    func addRemote(_ name: String, _ url: String, allowGitOrigin: Bool) async throws {
+        try await run(["dolt", "remote", "add", name, url] + (allowGitOrigin ? ["--allow-git-origin"] : []))
+    }
+    func removeRemote(_ name: String) async throws { try await run(["dolt", "remote", "remove", name]) }
+    func doltCommit() async throws { try await run(["dolt", "commit"]) }
+    func doltPush() async throws { try await run(["dolt", "push"]) }
+    func doltPull() async throws { try await run(["dolt", "pull"]) }
+
     // MARK: Reads
 
     func listAll() async throws -> [Issue] {

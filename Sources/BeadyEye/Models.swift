@@ -177,3 +177,6 @@ struct Memory: Identifiable, Hashable {
     let text: String
     var id: String { key }
 }
+
+struct DoltStatus: Equatable { var branch: String; var commit: String; var uncommitted: Int }
+struct DoltRemote: Identifiable, Hashable { let name: String; let url: String; var id: String { name } }
