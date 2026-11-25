@@ -18,12 +18,19 @@ Beady Eye drives the `bd` command line (`bd --json`) and never talks to Dolt dir
 - **Several projects.** Add any bd project as a connection and switch between them.
 - Light and dark appearance follow the system setting.
 
+## Download
+
+Get the latest `BeadyEye-<version>.dmg` from the [Releases](https://github.com/addywaddy/beady-eye/releases) page, open it and drag Beady Eye to Applications. The app is signed and notarized by Apple.
+
 ## Requirements
 
-- macOS 14 or later
-- Swift 6 toolchain (Xcode 16 or later, or the command line tools)
-- [`bd`](https://github.com/gastownhall/beads) 1.3 or later, on your `PATH`
-- Projects initialised with `bd init --server`, backed by a running Dolt server
+To run the app:
+
+- macOS 14 or later, on Apple silicon
+- [`bd`](https://github.com/gastownhall/beads) 1.3 or later, installed on your machine. Beady Eye drives it and does not bundle it.
+- A project initialised with `bd init --server`, backed by a running Dolt server
+
+To build it yourself you also need a Swift 6 toolchain (Xcode 16 or later, or the command line tools).
 
 The app finds `bd` through your login shell, then falls back to Homebrew's location. Embedded-mode and legacy server workspaces need migrating before a current `bd` can open them. See the beads upgrade notes.
 
@@ -46,7 +53,15 @@ For a build you want to distribute, name a certificate:
 SIGN_IDENTITY="Developer ID Application: Your Name (TEAMID)" Scripts/bundle.sh release
 ```
 
-`security find-identity -v -p codesigning` lists what is available. The script signs with the hardened runtime and a timestamp. Notarization is not part of it.
+`security find-identity -v -p codesigning` lists what is available. The script signs with the hardened runtime and a timestamp. Notarization is done by `Scripts/release.sh`.
+
+### Releasing
+
+`Scripts/release.sh` builds, signs with your Developer ID, notarizes, staples and packages `dist/BeadyEye-<version>.dmg`. It expects a notarytool keychain profile (see the comments in the script).
+
+```bash
+VERSION=0.1.0 Scripts/release.sh
+```
 
 ### App icon
 

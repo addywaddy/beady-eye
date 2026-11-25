@@ -12,7 +12,7 @@ struct ContentView: View {
                 Group {
                     if store.viewMode == .list {
                         NavigationSplitView {
-                            Sidebar().safeAreaInset(edge: .bottom, spacing: 0) { DoltBar() }.navigationSplitViewColumnWidth(min: 160, ideal: 180, max: 240)
+                            Sidebar().navigationSplitViewColumnWidth(min: 160, ideal: 180, max: 240)
                         } content: {
                             IssueList().navigationSplitViewColumnWidth(min: 300, ideal: 380)
                         } detail: {
@@ -20,7 +20,7 @@ struct ContentView: View {
                         }
                     } else {
                         NavigationSplitView {
-                            Sidebar().safeAreaInset(edge: .bottom, spacing: 0) { DoltBar() }.navigationSplitViewColumnWidth(min: 160, ideal: 180, max: 240)
+                            Sidebar().navigationSplitViewColumnWidth(min: 160, ideal: 180, max: 240)
                         } detail: {
                             // A plain resizable side panel, the same kind of container the list view's detail
                             // column is, rather than SwiftUI's .inspector.
@@ -133,6 +133,21 @@ struct Sidebar: View {
                     }
                     .buttonStyle(.plain)
                     .help("Show only issues whose status is “\(st.name)” (\(st.category)). Select several to combine.")
+                }
+            }
+            Section("Types") {
+                ForEach(store.filterTypes, id: \.self) { t in
+                    Button { store.toggleType(t) } label: {
+                        HStack {
+                            Label(t.capitalized, systemImage: TypeBadge(type: t).symbol).lineLimit(1)
+                            Spacer()
+                            Text("\(store.count(type: t))").foregroundStyle(.secondary)
+                            Image(systemName: "checkmark").opacity(store.typeFilter.contains(t) ? 1 : 0)
+                        }
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .help("Show only “\(t)” issues. Select several to combine.")
                 }
             }
             if !store.allEpics.isEmpty {

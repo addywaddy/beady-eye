@@ -9,3 +9,4 @@ build/
 # Beads / Dolt files (added by bd init)
 .beads/proxieddb/
 *.gate.lock*
+dist/

@@ -2,10 +2,11 @@
 # Builds BeadyEye and wraps it in BeadyEye.app.
 # Signed ad-hoc by default. For a distributable build, name a certificate:
 #   SIGN_IDENTITY="Developer ID Application: Your Name (TEAMID)" Scripts/bundle.sh release
-# (list yours with: security find-identity -v -p codesigning). Notarization is not done here.
+# (list yours with: security find-identity -v -p codesigning). Notarization is done by Scripts/release.sh.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 CONFIG=${1:-release}
+VERSION=${VERSION:-0.1.0}
 swift build -c "$CONFIG"
 APP=build/BeadyEye.app
 rm -rf "$APP"; mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
@@ -22,7 +23,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>CFBundleIconFile</key><string>AppIcon</string>
   <key>CFBundleExecutable</key><string>BeadyEye</string>
   <key>CFBundlePackageType</key><string>APPL</string>
-  <key>CFBundleShortVersionString</key><string>0.1.0</string>
+  <key>CFBundleShortVersionString</key><string>${VERSION}</string>
   <key>CFBundleVersion</key><string>1</string>
   <key>LSMinimumSystemVersion</key><string>14.0</string>
   <key>NSHighResolutionCapable</key><true/>
